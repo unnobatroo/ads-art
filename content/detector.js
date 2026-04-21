@@ -1,5 +1,11 @@
+/**
+ * AD DETECTOR
+ * Finds ad elements on the page using CSS selectors and heuristics.
+ */
+
+// CSS selectors to match ad elements by class, id, or data attributes
 const AD_SELECTORS = [
-  // google ads
+  // Google Ads
   'ins.adsbygoogle',
   '[id^="google_ads"]',
   '[id^="div-gpt-ad"]',
@@ -8,9 +14,8 @@ const AD_SELECTORS = [
   'iframe[src*="doubleclick.net"]',
   'iframe[src*="googlesyndication.com"]',
   'iframe[src*="googleadservices.com"]',
-  '[id*="google_ads"]',
 
-  // generic ad patterns
+  // Generic ad patterns
   '[class*="ad-container"]',
   '[class*="ad-wrapper"]',
   '[class*="ad-banner"]',
@@ -22,7 +27,7 @@ const AD_SELECTORS = [
   '[id*="ad-wrapper"]',
   '[id*="ad-banner"]',
 
-  // recommendation widgets
+  // Content recommendation networks
   '[id*="taboola"]',
   '[class*="taboola"]',
   '[id*="outbrain"]',
@@ -31,58 +36,25 @@ const AD_SELECTORS = [
   '[id*="mgid"]',
   '[class*="revcontent"]',
   '[id*="revcontent"]',
-  '[class*="zergnet"]',
-  '[id*="zergnet"]',
-  '[data-widget-id*="taboola"]',
-  '[data-widget-id*="outbrain"]',
 
-  // sponsored-content networks
-  '[class*="nativo"]',
-  '[class*="zemanta"]',
-
-  // labeled sponsored content
+  // Sponsored content
   '[class*="sponsored-content"]',
   '[class*="sponsored_content"]',
   '[class*="sponsored-post"]',
-  '[class*="sponsored-link"]',
-  '[class*="partner-content"]',
   '[class*="native-ad"]',
-  '[class*="nativead"]',
   '[data-testid*="ad"]',
   '[data-testid*="sponsored" i]',
-  '[data-testid*="promoted" i]',
   '[aria-label*="advertisement" i]',
   '[aria-label*="sponsored" i]',
-  '[data-sponsored="true"]',
 
-  // iab attributes
+  // Ad network attributes
   '[data-ad-format]',
   '[data-ad-unit-path]',
   '[data-slot]',
   '[pbadslot]',
 
-  // affiliate widgets
-  '[class*="affiliate-widget"]',
-  '[class*="product-recommendations"]',
-  '[class*="product-roundup"]',
-  '[class*="shopping-widget"]',
-
-  // newsletter and paywall prompts
-  '[class*="newsletter-signup"]',
-  '[class*="newsletter-form"]',
-  '[class*="newsletter-prompt"]',
-  '[class*="subscribe-banner"]',
-  '[class*="subscribe-prompt"]',
-  '[class*="paywall-prompt"]',
-  '[class*="mc4wp"]',
-  '[class*="mailchimp-form"]',
-  '[class*="meter-box"]',
-  '[id*="gateway-content"]',
-
-  // amazon ads
+  // Amazon and other ad iframes
   'iframe[src*="amazon-adsystem.com"]',
-
-  // common ad iframes
   'iframe[src*="adnxs.com"]',
   'iframe[src*="criteo.com"]',
   'iframe[src*="moatads.com"]',
@@ -91,93 +63,111 @@ const AD_SELECTORS = [
   'iframe[src*="openx.net"]',
   'iframe[src*="casalemedia.com"]',
 
-  // dfp and gam
-  '[class*="dfp-ad"]',
-  '[id*="dfp-ad"]',
-  'div[data-google-query-id]',
+  // Animated GIFs and Flash banners
+  'img[src*=".gif" i]',
+  'object[type="application/x-shockwave-flash"]',
+  'embed[type="application/x-shockwave-flash"]',
 ];
 
-// IAB standard ad sizes [width, height]
+// Standard IAB ad dimensions (width x height)
 const IAB_AD_SIZES = [
-  [728, 90],   // Leaderboard
-  [300, 250],  // Medium Rectangle
-  [160, 600],  // Wide Skyscraper
-  [320, 50],   // Mobile Banner
-  [300, 600],  // Half Page
-  [970, 250],  // Billboard
-  [970, 90],   // Large Leaderboard
-  [336, 280],  // Large Rectangle
-  [120, 600],  // Skyscraper
-  [320, 100],  // Large Mobile Banner
-  [250, 250],  // Square
-  [468, 60],   // Full Banner
+  [728, 90], [300, 250], [160, 600], [320, 50], [300, 600],
+  [970, 250], [970, 90], [336, 280], [120, 600], [320, 100],
 ];
 
-const SIZE_TOLERANCE = 0.15;
+const MIN_AD_SIZE = 50;
+const SIZE_TOLERANCE = 0.15; // 15% tolerance for dimension matching
 
-function matchesAdDimension(w, h) {
-  if (w < 50 || h < 50) return false;
-  return IAB_AD_SIZES.some(([aw, ah]) => {
-    return Math.abs(w - aw) / aw <= SIZE_TOLERANCE &&
-      Math.abs(h - ah) / ah <= SIZE_TOLERANCE;
-  });
-}
-
+// Known ad network domains
 const AD_DOMAINS = [
   'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
   'adnxs.com', 'amazon-adsystem.com', 'taboola.com', 'outbrain.com',
   'criteo.com', 'moatads.com', 'rubiconproject.com', 'pubmatic.com',
   'openx.net', 'casalemedia.com', 'serving-sys.com', 'adform.net',
-  'adsrvr.org', 'bidswitch.net', 'contextweb.com',
 ];
 
-function looksLikeAd(el) {
-  if (el.tagName === 'IFRAME') {
-    const src = el.src || '';
-    return AD_DOMAINS.some(d => src.includes(d));
-  }
+/**
+ * Check if an element's dimensions match standard ad sizes
+ */
+function matchesAdDimension(width, height) {
+  if (width < MIN_AD_SIZE || height < MIN_AD_SIZE) return false;
 
-  const innerIframes = el.querySelectorAll('iframe');
-  for (const iframe of innerIframes) {
-    const src = iframe.src || '';
-    if (AD_DOMAINS.some(d => src.includes(d))) return true;
-  }
-
-  const text = el.textContent?.trim() || '';
-  if (text.length < 20 && (el.querySelector('img, iframe'))) return true;
-  return false;
+  return IAB_AD_SIZES.some(([stdWidth, stdHeight]) => {
+    const widthMatch = Math.abs(width - stdWidth) / stdWidth <= SIZE_TOLERANCE;
+    const heightMatch = Math.abs(height - stdHeight) / stdHeight <= SIZE_TOLERANCE;
+    return widthMatch && heightMatch;
+  });
 }
 
-function detectAds(root = document) {
-  const found = new Set();
-  const isElement = root.nodeType === Node.ELEMENT_NODE;
+/**
+ * Check if an iframe's source domain is a known ad network
+ */
+function isAdIframe(element) {
+  const src = element.src || '';
+  return AD_DOMAINS.some(domain => src.includes(domain));
+}
 
+/**
+ * Use heuristics to determine if an element looks like an ad
+ */
+function looksLikeAd(element) {
+  if (element.tagName === 'IFRAME') {
+    return isAdIframe(element);
+  }
+
+  // Check if contains ad network iframes
+  const hasAdIframe = Array.from(element.querySelectorAll('iframe'))
+    .some(frame => isAdIframe(frame));
+  if (hasAdIframe) return true;
+
+  // Small text + media = likely ad
+  const textLength = (element.textContent?.trim() || '').length;
+  const hasMedia = !!element.querySelector('img, iframe');
+  return textLength < 20 && hasMedia;
+}
+
+/**
+ * Find all ad elements in a container
+ */
+function detectAds(container = document) {
+  const found = new Set();
+  const isElement = container.nodeType === Node.ELEMENT_NODE;
+
+  // Find elements matching CSS selectors
   for (const selector of AD_SELECTORS) {
     try {
-      if (isElement && root.matches(selector) && !root.dataset.artReplacer) {
-        found.add(root);
+      // Check if container itself matches
+      if (isElement && container.matches(selector) && !container.dataset.artReplacer) {
+        found.add(container);
       }
-      root.querySelectorAll(selector).forEach(el => {
+      // Find children matching selector
+      container.querySelectorAll(selector).forEach(el => {
         if (!el.dataset.artReplacer) found.add(el);
       });
-    } catch (_) {
+    } catch (e) {
+      // Invalid selector, skip
     }
   }
 
-  const checkDim = (el) => {
+  // Find elements by dimension heuristics
+  const checkDimensions = (el) => {
     if (found.has(el) || el.dataset.artReplacer) return;
     if (el.tagName !== 'IFRAME' && el.tagName !== 'DIV') return;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    if (matchesAdDimension(w, h) && looksLikeAd(el)) {
+
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    if (matchesAdDimension(width, height) && looksLikeAd(el)) {
       found.add(el);
     }
   };
-  if (isElement) checkDim(root);
-  root.querySelectorAll('iframe, div').forEach(checkDim);
 
+  if (isElement) checkDimensions(container);
+  container.querySelectorAll('iframe, div').forEach(checkDimensions);
+
+  // Filter out nested duplicates and already-processed ads
   return [...found].filter((el) => {
     if (el.dataset.artReplacer) return false;
+
     let parent = el.parentElement;
     while (parent) {
       if (found.has(parent) || parent.dataset?.artReplacer) return false;
@@ -187,5 +177,6 @@ function detectAds(root = document) {
   });
 }
 
+// Export detection function
 window.__artReplacer = window.__artReplacer || {};
 window.__artReplacer.detectAds = detectAds;

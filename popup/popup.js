@@ -1,60 +1,92 @@
+/**
+ * POPUP SCRIPT
+ * Manages the extension popup UI and settings.
+ */
+
+// DOM elements
 const enabledToggle = document.getElementById('enabled');
-const powerToggle = document.querySelector('.power-toggle');
+const powerToggleEl = document.querySelector('.power-toggle');
 const categoryButtons = [...document.querySelectorAll('[data-category]')];
 const countDisplay = document.getElementById('count');
 
+const VALID_CATEGORIES = ['all', 'art', 'nasa'];
+const DEFAULT_CATEGORY = 'art';
+
+/**
+ * Normalize category to a valid value
+ */
 function normalizeCategory(category) {
-  if (category === 'nasa') return 'nasa';
-  if (category === 'all' || category === 'art') return category;
-  return 'art';
+  return VALID_CATEGORIES.includes(category) ? category : DEFAULT_CATEGORY;
 }
 
+/**
+ * Update active button in category selector
+ */
 function setActiveCategory(category) {
-  const nextCategory = normalizeCategory(category);
-  for (const button of categoryButtons) {
-    const isActive = button.dataset.category === nextCategory;
+  const normalized = normalizeCategory(category);
+
+  categoryButtons.forEach(button => {
+    const isActive = button.dataset.category === normalized;
     button.classList.toggle('active', isActive);
     button.setAttribute('aria-pressed', String(isActive));
-  }
-  return nextCategory;
+  });
+
+  return normalized;
 }
 
+/**
+ * Update power toggle display state
+ */
 function setPowerState(isEnabled) {
-  if (!powerToggle) return;
-  powerToggle.dataset.state = isEnabled ? 'on' : 'off';
-  const label = powerToggle.querySelector('.power-toggle-ui');
+  if (!powerToggleEl) return;
+
+  powerToggleEl.dataset.state = isEnabled ? 'on' : 'off';
+
+  const label = powerToggleEl.querySelector('.power-toggle-ui');
   if (label) {
     label.textContent = isEnabled ? 'on' : 'off';
   }
 }
 
-/** load saved ui state. */
+/**
+ * Update counter display
+ */
+function updateCounter(count) {
+  countDisplay.textContent = count || '0';
+}
+
+// ===== Initialize =====
+
+// Load saved settings
 chrome.storage.sync.get({ enabled: true, category: 'all' }, (settings) => {
   enabledToggle.checked = settings.enabled;
   setPowerState(settings.enabled);
+
   const category = setActiveCategory(settings.category);
   if (category !== settings.category) {
     chrome.storage.sync.set({ category });
   }
 });
 
-/** show the session count. */
+// Load replacement counter
 chrome.runtime.sendMessage({ type: 'GET_COUNT' }, (response) => {
   if (response?.totalReplaced) {
-    countDisplay.textContent = response.totalReplaced;
+    updateCounter(response.totalReplaced);
   }
 });
 
-/** save the toggle state. */
+// ===== Event Listeners =====
+
+// Toggle extension on/off
 enabledToggle.addEventListener('change', () => {
   setPowerState(enabledToggle.checked);
   chrome.storage.sync.set({ enabled: enabledToggle.checked });
 });
 
-/** save the selected collection. */
-for (const button of categoryButtons) {
+// Switch between art categories
+categoryButtons.forEach(button => {
   button.addEventListener('click', () => {
     const category = setActiveCategory(button.dataset.category);
     chrome.storage.sync.set({ category });
   });
-}
+});

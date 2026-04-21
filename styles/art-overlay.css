@@ -582,13 +582,12 @@ zeus-ad {
   background: rgba(10, 10, 10, 0.95);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: #fff;
-  font-family: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-family: 'Georgia', 'Garamond', 'Palatino', serif;
   font-size: 11px;
   line-height: 1.4;
   opacity: 0;
   transition: opacity 0.25s ease;
   pointer-events: none;
-  text-transform: lowercase;
 }
 
 .art-replacer-container:hover .art-replacer-tooltip {

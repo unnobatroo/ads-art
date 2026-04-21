@@ -1,162 +1,214 @@
+/**
+ * AD REPLACER
+ * Replaces detected ads with artwork from various sources.
+ */
+
 (async function () {
   const AR = window.__artReplacer;
   if (!AR) return;
 
-  // stop early when disabled
+  // Get extension settings
   const settings = await chrome.storage.sync.get({ enabled: true, category: 'all' });
   if (!settings.enabled) return;
 
-  let replaceCount = 0;
+  const MIN_DIMENSION = 50; // Minimum size for valid ad slots
+  const RATIO_TOLERANCE = 0.2; // 20% tolerance for aspect ratio mismatch
 
-  /** build the image url for the target slot. */
-  function getImageUrl(artwork, targetWidth, targetHeight) {
-    if (artwork.imageId) {
-      const w = Math.min(Math.round(targetWidth * 2), 843);
-      const h = Math.min(Math.round(targetHeight * 2), 843);
-
-      if (artwork.width && artwork.height) {
-        const targetRatio = targetWidth / targetHeight;
-        const artRatio = artwork.width / artwork.height;
-        const ratioDiff = Math.abs(artRatio - targetRatio) / targetRatio;
-
-        if (ratioDiff > 0.2) {
-          let cropW, cropH, cropX, cropY;
-          if (targetRatio > artRatio) {
-            cropW = artwork.width;
-            cropH = Math.round(artwork.width / targetRatio);
-            cropX = 0;
-            cropY = Math.round((artwork.height - cropH) / 2);
-          } else {
-            cropH = artwork.height;
-            cropW = Math.round(artwork.height * targetRatio);
-            cropX = Math.round((artwork.width - cropW) / 2);
-            cropY = 0;
-          }
-          return `https://www.artic.edu/iiif/2/${artwork.imageId}/${cropX},${cropY},${cropW},${cropH}/${w},/0/default.jpg`;
-        }
-      }
-
-      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/${w},/0/default.jpg`;
+  /**
+   * Build image URL for Art Institute of Chicago artwork
+   * Crops if needed to match target aspect ratio
+   */
+  function buildArtImageUrl(artwork, slotWidth, slotHeight) {
+    if (!artwork.imageId) {
+      return artwork.smallImageUrl || artwork.imageUrl || '';
     }
-    return artwork.smallImageUrl || artwork.imageUrl || '';
+
+    // Request higher resolution (up to 843x843)
+    const reqWidth = Math.min(Math.round(slotWidth * 2), 843);
+    const reqHeight = Math.min(Math.round(slotHeight * 2), 843);
+
+    // If artwork dimensions unknown or ratios match, use full artwork
+    if (!artwork.width || !artwork.height) {
+      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/${reqWidth},/0/default.jpg`;
+    }
+
+    // Check if aspect ratios are too different
+    const slotRatio = slotWidth / slotHeight;
+    const artRatio = artwork.width / artwork.height;
+    const ratioDiff = Math.abs(artRatio - slotRatio) / slotRatio;
+
+    if (ratioDiff <= RATIO_TOLERANCE) {
+      // Ratios match, use full artwork
+      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/${reqWidth},/0/default.jpg`;
+    }
+
+    // Crop artwork to match slot ratio
+    let cropWidth, cropHeight, cropX, cropY;
+    if (slotRatio > artRatio) {
+      // Slot is wider than artwork, crop height
+      cropWidth = artwork.width;
+      cropHeight = Math.round(artwork.width / slotRatio);
+      cropX = 0;
+      cropY = Math.round((artwork.height - cropHeight) / 2);
+    } else {
+      // Slot is taller than artwork, crop width
+      cropHeight = artwork.height;
+      cropWidth = Math.round(artwork.height * slotRatio);
+      cropX = Math.round((artwork.width - cropWidth) / 2);
+      cropY = 0;
+    }
+
+    return `https://www.artic.edu/iiif/2/${artwork.imageId}/${cropX},${cropY},${cropWidth},${cropHeight}/${reqWidth},/0/default.jpg`;
   }
 
-  /** replace one ad slot with art. */
-  async function replaceAdWithArt(adElement) {
+  /**
+   * Escape HTML text to prevent XSS
+   */
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /**
+   * Determine how to fit image into slot
+   * Use 'cover' for extreme aspect ratios (very wide or tall)
+   * Use 'contain' for normal rectangles
+   */
+  function getObjectFit(slotWidth, slotHeight) {
+    const ratio = slotWidth / slotHeight;
+    return (ratio > 3 || ratio < 0.33) ? 'cover' : 'contain';
+  }
+
+  /**
+   * Create DOM elements for art replacement
+   */
+  function createArtContainer(artwork, slotWidth, slotHeight) {
+    // Container
+    const container = document.createElement('div');
+    container.className = 'art-replacer-container';
+    container.style.cssText = `width:${slotWidth}px;height:${slotHeight}px;position:relative;overflow:hidden;`;
+
+    // Image
+    const imageUrl = buildArtImageUrl(artwork, slotWidth, slotHeight);
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.alt = `${artwork.title} by ${artwork.artist}`;
+    img.className = 'art-replacer-image';
+    img.style.cssText = `width:100%;height:100%;object-fit:${getObjectFit(slotWidth, slotHeight)};`;
+    container.appendChild(img);
+
+    // Tooltip with artwork info
+    const tooltip = document.createElement('div');
+    tooltip.className = 'art-replacer-tooltip';
+    const dateStr = artwork.date ? ` (${escapeHtml(artwork.date)})` : '';
+    tooltip.innerHTML = `
+      <strong>${escapeHtml(artwork.title)}</strong><br>
+      ${escapeHtml(artwork.artist)}${dateStr}<br>
+      <span class="art-replacer-source">${escapeHtml(artwork.source)}</span>
+    `;
+    container.appendChild(tooltip);
+
+    return container;
+  }
+
+  /**
+   * Replace a single ad element with artwork
+   */
+  async function replaceAd(adElement) {
+    // Skip if already processed
     if (adElement.dataset.artReplacer === 'replaced') return;
-    const w = adElement.offsetWidth;
-    const h = adElement.offsetHeight;
-    if (w < 50 || h < 50) return;
+
+    const width = adElement.offsetWidth;
+    const height = adElement.offsetHeight;
+
+    // Skip if too small
+    if (width < MIN_DIMENSION || height < MIN_DIMENSION) return;
 
     adElement.dataset.artReplacer = 'replacing';
 
     try {
+      // Request artwork from service worker
       const response = await chrome.runtime.sendMessage({
         type: 'GET_ART',
-        width: w,
-        height: h,
+        width,
+        height,
         category: settings.category,
       });
 
-      if (!response || !response.artwork) {
+      if (!response?.artwork) {
         adElement.dataset.artReplacer = 'failed';
         return;
       }
 
-      const art = response.artwork;
-      const imageUrl = getImageUrl(art, w, h);
-      if (!imageUrl) {
-        adElement.dataset.artReplacer = 'failed';
-        return;
-      }
+      const artwork = response.artwork;
+      const artContainer = createArtContainer(artwork, width, height);
 
-      const container = document.createElement('div');
-      container.className = 'art-replacer-container';
-      container.style.cssText = `width:${w}px;height:${h}px;position:relative;overflow:hidden;`;
-
-      const img = document.createElement('img');
-      img.src = imageUrl;
-      img.alt = `${art.title} by ${art.artist}`;
-      img.className = 'art-replacer-image';
-      const slotRatio = w / h;
-      const fit = (slotRatio > 3 || slotRatio < 0.33) ? 'cover' : 'contain';
-      img.style.cssText = `width:100%;height:100%;object-fit:${fit};`;
-
-      const tooltip = document.createElement('div');
-      tooltip.className = 'art-replacer-tooltip';
-      tooltip.innerHTML = `
-        <strong>${escapeHtml(art.title)}</strong><br>
-        ${escapeHtml(art.artist)}${art.date ? ` (${escapeHtml(art.date)})` : ''}<br>
-        <span class="art-replacer-source">${escapeHtml(art.source)}</span>
-      `;
-
-      container.appendChild(img);
-      container.appendChild(tooltip);
-
+      // Handle iframes differently (need to replace in parent)
       if (adElement.tagName === 'IFRAME') {
         const parent = adElement.parentElement;
         if (parent) {
-          parent.insertBefore(container, adElement);
-          container.dataset.artReplacer = 'replaced';
+          parent.insertBefore(artContainer, adElement);
           adElement.remove();
-          replaceCount++;
-          chrome.runtime.sendMessage({ type: 'INCREMENT_COUNT' }).catch(() => { });
+        } else {
+          adElement.dataset.artReplacer = 'failed';
           return;
         }
-        adElement.dataset.artReplacer = 'failed';
-        return;
+      } else {
+        // For other elements, clear contents and add container
+        adElement.innerHTML = '';
+        adElement.appendChild(artContainer);
       }
 
-      adElement.innerHTML = '';
-      adElement.appendChild(container);
-      adElement.dataset.artReplacer = 'replaced';
-      replaceCount++;
+      // Mark as replaced
+      artContainer.dataset.artReplacer = 'replaced';
+      
+      // Notify service worker to update counter
+      chrome.runtime.sendMessage({ type: 'INCREMENT_COUNT' }).catch(() => {});
 
-      chrome.runtime.sendMessage({
-        type: 'INCREMENT_COUNT',
-      }).catch(() => { });
-
-    } catch (e) {
-      console.warn('[Art Replacer] Failed to replace ad:', e);
+    } catch (error) {
+      console.warn('[Art Replacer] Failed to replace ad:', error);
       adElement.dataset.artReplacer = 'failed';
     }
   }
 
-  /** escape plain text for the tooltip. */
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  /** replace ads one at a time. */
-  async function processAds(adElements) {
+  /**
+   * Replace multiple ads sequentially
+   */
+  async function replaceAds(adElements) {
     for (const ad of adElements) {
-      await replaceAdWithArt(ad);
+      await replaceAd(ad);
     }
   }
 
+  // Replace existing ads on page load
   const initialAds = AR.detectAds(document);
   if (initialAds.length > 0) {
-    console.log(`[Art Replacer] found ${initialAds.length} ads`);
-    await processAds(initialAds);
+    console.log(`[Art Replacer] Found ${initialAds.length} ads on page load`);
+    await replaceAds(initialAds);
   }
 
+  // Watch for new ads added to the page
   if (AR.startObserver) {
     AR.startObserver(async (newAds) => {
       if (newAds.length > 0) {
-        console.log(`[Art Replacer] found ${newAds.length} new ads`);
-        await processAds(newAds);
+        console.log(`[Art Replacer] Found ${newAds.length} new ads`);
+        await replaceAds(newAds);
       }
     });
   }
 
+  // React to settings changes
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
+      // Reload page if extension is disabled
       if (changes.enabled?.newValue === false) {
         location.reload();
       }
-      if (changes.category) settings.category = changes.category.newValue;
+      // Update category preference
+      if (changes.category) {
+        settings.category = changes.category.newValue;
+      }
     }
   });
 })();
