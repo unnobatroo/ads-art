@@ -558,6 +558,7 @@ zeus-ad {
   border-radius: 0;
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.38);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
 }
 
 .art-replacer-container:hover {
@@ -571,6 +572,7 @@ zeus-ad {
   height: 100%;
   object-fit: contain;
   transition: opacity 0.3s ease;
+  background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
 }
 
 .art-replacer-tooltip {

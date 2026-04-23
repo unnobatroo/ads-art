@@ -408,7 +408,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'GET_COUNT') {
-    chrome.storage.session.get({ totalReplaced: 0 }).then(sendResponse);
+    chrome.storage.session.get({ totalReplaced: 0 }).then(response => {
+      sendResponse(response || { totalReplaced: 0 });
+    }).catch(() => {
+      sendResponse({ totalReplaced: 0 });
+    });
     return true;
   }
 
@@ -419,36 +423,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * Handle art request from content script
  */
 async function handleGetArt({ width, height, category }) {
-  category = normalizeCategory(category);
-  const aspect = classifyAspect(width, height);
-  const ratio = width / height;
+  try {
+    category = normalizeCategory(category);
+    const aspect = classifyAspect(width, height);
+    const ratio = width / height;
 
-  // Try to get from cache
-  let artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
+    // Try to get from cache
+    let artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
 
-  // If cache miss, fetch new artworks
-  if (!artwork) {
-    await fetchAndCache(category);
-    artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
+    // If cache miss, fetch new artworks
+    if (!artwork) {
+      await fetchAndCache(category).catch(() => {});
+      artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
+    }
+
+    return artwork ? { artwork } : { artwork: null };
+  } catch (error) {
+    console.warn('[Art Replacer] Failed to get artwork:', error);
+    return { artwork: null };
   }
-
-  return artwork ? { artwork } : null;
 }
 
 // ===== Lifecycle =====
 
 chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[Art Replacer] Extension installed, pre-caching artworks...');
-
-  // Pre-cache from multiple sources
-  await Promise.all([
-    fetchAndCache('all'),
-    fetchAndCache('all'),
-    fetchAndCache('art'),
-    fetchAndCache('nasa'),
-  ]);
-
-  console.log('[Art Replacer] Pre-cache complete');
+  try {
+    // Pre-cache from multiple sources (parallel calls)
+    await Promise.all([
+      fetchAndCache('all').catch(() => {}),
+      fetchAndCache('art').catch(() => {}),
+      fetchAndCache('nasa').catch(() => {}),
+    ]);
+  } catch (error) {
+    console.warn('[Art Replacer] Pre-cache error:', error);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {

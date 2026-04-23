@@ -11,8 +11,9 @@
   const settings = await chrome.storage.sync.get({ enabled: true, category: 'all' });
   if (!settings.enabled) return;
 
-  const MIN_DIMENSION = 50; // Minimum size for valid ad slots
-  const RATIO_TOLERANCE = 0.2; // 20% tolerance for aspect ratio mismatch
+  const MIN_DIMENSION = 50;
+  const RATIO_TOLERANCE = 0.2;
+  const DEBUG = false; // Set to true for logging
 
   /**
    * Build image URL for Art Institute of Chicago artwork
@@ -71,25 +72,25 @@
   }
 
   /**
-   * Determine how to fit image into slot
-   * Use 'cover' for extreme aspect ratios (very wide or tall)
-   * Use 'contain' for normal rectangles
+   * Determine how to fit image into slot.
    */
   function getObjectFit(slotWidth, slotHeight) {
     const ratio = slotWidth / slotHeight;
+    // 'cover' for extreme aspect ratios (very wide or tall)
+    // 'contain' for normal rectangles
     return (ratio > 3 || ratio < 0.33) ? 'cover' : 'contain';
   }
 
   /**
-   * Create DOM elements for art replacement
+   * Create DOM elements for art replacement.
    */
   function createArtContainer(artwork, slotWidth, slotHeight) {
-    // Container
+    // container
     const container = document.createElement('div');
     container.className = 'art-replacer-container';
     container.style.cssText = `width:${slotWidth}px;height:${slotHeight}px;position:relative;overflow:hidden;`;
 
-    // Image
+    // img
     const imageUrl = buildArtImageUrl(artwork, slotWidth, slotHeight);
     const img = document.createElement('img');
     img.src = imageUrl;
@@ -98,7 +99,7 @@
     img.style.cssText = `width:100%;height:100%;object-fit:${getObjectFit(slotWidth, slotHeight)};`;
     container.appendChild(img);
 
-    // Tooltip with artwork info
+    // artwork info
     const tooltip = document.createElement('div');
     tooltip.className = 'art-replacer-tooltip';
     const dateStr = artwork.date ? ` (${escapeHtml(artwork.date)})` : '';
@@ -113,22 +114,22 @@
   }
 
   /**
-   * Replace a single ad element with artwork
+   * Replace a single ad element with artwork.
    */
   async function replaceAd(adElement) {
-    // Skip if already processed
+    // skip if already processed
     if (adElement.dataset.artReplacer === 'replaced') return;
 
     const width = adElement.offsetWidth;
     const height = adElement.offsetHeight;
 
-    // Skip if too small
+    // skip if too small
     if (width < MIN_DIMENSION || height < MIN_DIMENSION) return;
 
     adElement.dataset.artReplacer = 'replacing';
 
     try {
-      // Request artwork from service worker
+      // request artwork from service worker
       const response = await chrome.runtime.sendMessage({
         type: 'GET_ART',
         width,
@@ -144,7 +145,7 @@
       const artwork = response.artwork;
       const artContainer = createArtContainer(artwork, width, height);
 
-      // Handle iframes differently (need to replace in parent)
+      // handle iframes differently (need to replace in parent)
       if (adElement.tagName === 'IFRAME') {
         const parent = adElement.parentElement;
         if (parent) {
@@ -155,25 +156,22 @@
           return;
         }
       } else {
-        // For other elements, clear contents and add container
+        // for other elements clear contents and add container
         adElement.innerHTML = '';
         adElement.appendChild(artContainer);
       }
 
-      // Mark as replaced
       artContainer.dataset.artReplacer = 'replaced';
-      
-      // Notify service worker to update counter
-      chrome.runtime.sendMessage({ type: 'INCREMENT_COUNT' }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'INCREMENT_COUNT' }).catch(() => { });
 
     } catch (error) {
-      console.warn('[Art Replacer] Failed to replace ad:', error);
+      if (DEBUG) console.warn('[Art Replacer] Failed to replace ad:', error);
       adElement.dataset.artReplacer = 'failed';
     }
   }
 
   /**
-   * Replace multiple ads sequentially
+   * Replace multiple ads sequentially.
    */
   async function replaceAds(adElements) {
     for (const ad of adElements) {
@@ -181,31 +179,29 @@
     }
   }
 
-  // Replace existing ads on page load
+  // replace existing ads on page load
   const initialAds = AR.detectAds(document);
   if (initialAds.length > 0) {
-    console.log(`[Art Replacer] Found ${initialAds.length} ads on page load`);
+    if (DEBUG) console.log(`[Art Replacer] Found ${initialAds.length} ads on load`);
     await replaceAds(initialAds);
   }
 
-  // Watch for new ads added to the page
+  // watch for new ads
   if (AR.startObserver) {
     AR.startObserver(async (newAds) => {
       if (newAds.length > 0) {
-        console.log(`[Art Replacer] Found ${newAds.length} new ads`);
+        if (DEBUG) console.log(`[Art Replacer] Found ${newAds.length} new ads`);
         await replaceAds(newAds);
       }
     });
   }
 
-  // React to settings changes
+  // react to settings changes
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync') {
-      // Reload page if extension is disabled
       if (changes.enabled?.newValue === false) {
         location.reload();
       }
-      // Update category preference
       if (changes.category) {
         settings.category = changes.category.newValue;
       }

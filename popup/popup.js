@@ -11,6 +11,9 @@ const countDisplay = document.getElementById('count');
 
 const VALID_CATEGORIES = ['all', 'art', 'nasa'];
 const DEFAULT_CATEGORY = 'art';
+const STORAGE_SYNC_DELAY = 300; // ms
+
+let syncInProgress = false;
 
 /**
  * Normalize category to a valid value
@@ -29,6 +32,7 @@ function setActiveCategory(category) {
     const isActive = button.dataset.category === normalized;
     button.classList.toggle('active', isActive);
     button.setAttribute('aria-pressed', String(isActive));
+    button.disabled = syncInProgress;
   });
 
   return normalized;
@@ -41,6 +45,7 @@ function setPowerState(isEnabled) {
   if (!powerToggleEl) return;
 
   powerToggleEl.dataset.state = isEnabled ? 'on' : 'off';
+  powerToggleEl.disabled = syncInProgress;
 
   const label = powerToggleEl.querySelector('.power-toggle-ui');
   if (label) {
@@ -53,6 +58,30 @@ function setPowerState(isEnabled) {
  */
 function updateCounter(count) {
   countDisplay.textContent = count || '0';
+}
+
+/**
+ * Save settings to storage and handle sync state
+ */
+async function saveSetting(key, value) {
+  syncInProgress = true;
+  updateUIState();
+  
+  return new Promise(resolve => {
+    chrome.storage.sync.set({ [key]: value }, () => {
+      syncInProgress = false;
+      updateUIState();
+      resolve();
+    });
+  });
+}
+
+/**
+ * Update UI based on sync state
+ */
+function updateUIState() {
+  powerToggleEl.disabled = syncInProgress;
+  categoryButtons.forEach(btn => btn.disabled = syncInProgress);
 }
 
 // ===== Initialize =====
@@ -80,13 +109,14 @@ chrome.runtime.sendMessage({ type: 'GET_COUNT' }, (response) => {
 // Toggle extension on/off
 enabledToggle.addEventListener('change', () => {
   setPowerState(enabledToggle.checked);
-  chrome.storage.sync.set({ enabled: enabledToggle.checked });
+  saveSetting('enabled', enabledToggle.checked);
 });
 
 // Switch between art categories
 categoryButtons.forEach(button => {
   button.addEventListener('click', () => {
+    if (syncInProgress) return;
     const category = setActiveCategory(button.dataset.category);
-    chrome.storage.sync.set({ category });
+    saveSetting('category', category);
   });
 });

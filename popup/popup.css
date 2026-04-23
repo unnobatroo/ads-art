@@ -63,8 +63,13 @@ body {
   line-height: 1;
 }
 
-.power-toggle:hover {
-  background: #f0e8e2;
+.power-toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.power-toggle:disabled:hover {
+  background: #faf7f4;
 }
 
 .power-toggle input {
@@ -95,6 +100,16 @@ body {
 .setting-row {
   padding: 14px 0;
   border-bottom: 1px solid rgba(90, 84, 80, 0.1);
+}
+
+.setting-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: #9b8f87;
+  text-transform: uppercase;
+  margin-bottom: 8px;
 }
 
 .collection-toggle {
@@ -131,8 +146,9 @@ body {
   color: #5a5450;
 }
 
-.collection-button:not(.active) {
-  background: #faf7f4;
+.collection-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .stats {
