@@ -14,6 +14,7 @@
   const MIN_DIMENSION = 50;
   const RATIO_TOLERANCE = 0.2;
   const DEBUG = false; // Set to true for logging
+  let replaceQueue = Promise.resolve();
 
   /**
    * Build image URL for Art Institute of Chicago artwork
@@ -118,10 +119,13 @@
    */
   async function replaceAd(adElement) {
     // skip if already processed
-    if (adElement.dataset.artReplacer === 'replaced') return;
+    if (adElement.dataset.artReplacer === 'replaced' || adElement.dataset.artReplacer === 'replacing') {
+      return;
+    }
 
-    const width = adElement.offsetWidth;
-    const height = adElement.offsetHeight;
+    const rect = adElement.getBoundingClientRect();
+    const width = Math.round(rect.width || adElement.offsetWidth || 0);
+    const height = Math.round(rect.height || adElement.offsetHeight || 0);
 
     // skip if too small
     if (width < MIN_DIMENSION || height < MIN_DIMENSION) return;
@@ -179,11 +183,21 @@
     }
   }
 
+  function enqueueReplacement(adElements) {
+    replaceQueue = replaceQueue
+      .then(() => replaceAds(adElements))
+      .catch((error) => {
+        if (DEBUG) console.warn('[Art Replacer] Queue error:', error);
+      });
+
+    return replaceQueue;
+  }
+
   // replace existing ads on page load
   const initialAds = AR.detectAds(document);
   if (initialAds.length > 0) {
     if (DEBUG) console.log(`[Art Replacer] Found ${initialAds.length} ads on load`);
-    await replaceAds(initialAds);
+    await enqueueReplacement(initialAds);
   }
 
   // watch for new ads
@@ -191,7 +205,7 @@
     AR.startObserver(async (newAds) => {
       if (newAds.length > 0) {
         if (DEBUG) console.log(`[Art Replacer] Found ${newAds.length} new ads`);
-        await replaceAds(newAds);
+        await enqueueReplacement(newAds);
       }
     });
   }

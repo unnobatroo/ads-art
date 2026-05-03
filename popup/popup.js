@@ -10,8 +10,7 @@ const categoryButtons = [...document.querySelectorAll('[data-category]')];
 const countDisplay = document.getElementById('count');
 
 const VALID_CATEGORIES = ['all', 'art', 'nasa'];
-const DEFAULT_CATEGORY = 'art';
-const STORAGE_SYNC_DELAY = 300; // ms
+const DEFAULT_CATEGORY = 'all';
 
 let syncInProgress = false;
 
@@ -66,9 +65,12 @@ function updateCounter(count) {
 async function saveSetting(key, value) {
   syncInProgress = true;
   updateUIState();
-  
+
   return new Promise(resolve => {
     chrome.storage.sync.set({ [key]: value }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn('[Art Replacer] Failed to save setting:', chrome.runtime.lastError.message);
+      }
       syncInProgress = false;
       updateUIState();
       resolve();
@@ -80,6 +82,7 @@ async function saveSetting(key, value) {
  * Update UI based on sync state
  */
 function updateUIState() {
+  enabledToggle.disabled = syncInProgress;
   powerToggleEl.disabled = syncInProgress;
   categoryButtons.forEach(btn => btn.disabled = syncInProgress);
 }
@@ -99,9 +102,7 @@ chrome.storage.sync.get({ enabled: true, category: 'all' }, (settings) => {
 
 // Load replacement counter
 chrome.runtime.sendMessage({ type: 'GET_COUNT' }, (response) => {
-  if (response?.totalReplaced) {
-    updateCounter(response.totalReplaced);
-  }
+  updateCounter(response?.totalReplaced ?? 0);
 });
 
 // ===== Event Listeners =====

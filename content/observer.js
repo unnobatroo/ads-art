@@ -10,45 +10,53 @@ window.__artReplacer = window.__artReplacer || {};
 
 window.__artReplacer.startObserver = function(onAdFound) {
   if (typeof onAdFound !== 'function') return null;
-  
+
+  const pendingElements = new Set();
   let debounceTimer = null;
   let errorCount = 0;
 
+  const flushPending = () => {
+    const newElements = [...pendingElements];
+    pendingElements.clear();
+    if (newElements.length === 0) return;
+
+    // skip our own art replacements
+    const filteredElements = newElements.filter(el =>
+      !el.classList?.contains('art-replacer-container')
+    );
+
+    if (filteredElements.length === 0) return;
+
+    // detect ads in newly added elements
+    const detectAds = window.__artReplacer.detectAds;
+    if (!detectAds) return;
+
+    const foundAds = new Set();
+    filteredElements.forEach(el => {
+      const ads = detectAds(el);
+      if (Array.isArray(ads)) {
+        ads.forEach(ad => foundAds.add(ad));
+      }
+    });
+
+    if (foundAds.size > 0) {
+      onAdFound([...foundAds]);
+    }
+  };
+
   const observer = new MutationObserver((mutations) => {
     try {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            pendingElements.add(node);
+          }
+        }
+      }
+
       // debounce to avoid processing too frequently
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        // collect all newly added elements
-        const newElements = mutations
-          .flatMap(m => Array.from(m.addedNodes))
-          .filter(node => node.nodeType === Node.ELEMENT_NODE);
-
-        if (newElements.length === 0) return;
-
-        // skip our own art replacements
-        const filteredElements = newElements.filter(el =>
-          !el.classList?.contains('art-replacer-container')
-        );
-
-        if (filteredElements.length === 0) return;
-
-        // detect ads in newly added elements
-        const detectAds = window.__artReplacer.detectAds;
-        if (!detectAds) return;
-
-        const foundAds = new Set();
-        filteredElements.forEach(el => {
-          const ads = detectAds(el);
-          if (Array.isArray(ads)) {
-            ads.forEach(ad => foundAds.add(ad));
-          }
-        });
-
-        if (foundAds.size > 0) {
-          onAdFound([...foundAds]);
-        }
-      }, DEBOUNCE_DELAY);
+      debounceTimer = setTimeout(flushPending, DEBOUNCE_DELAY);
     } catch (error) {
       errorCount++;
       if (errorCount >= MAX_OBSERVER_ERRORS) {
@@ -58,9 +66,13 @@ window.__artReplacer.startObserver = function(onAdFound) {
   });
 
   // watch entire document for changes
-  observer.observe(document.body, {
+  const root = document.body || document.documentElement;
+  if (!root) return null;
+
+  observer.observe(root, {
     childList: true,
     subtree: true,
   });
 
   return observer;
+};

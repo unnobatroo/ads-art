@@ -32,9 +32,22 @@ const CATEGORY_APIS = {
   nasa: ['nasa'],
 };
 
+const MESSAGE_TYPE = {
+  GET_ART: 'GET_ART',
+  INCREMENT_COUNT: 'INCREMENT_COUNT',
+  GET_COUNT: 'GET_COUNT',
+};
+
+const CACHE_MAX_ITEMS = 300;
+const CACHE_REFILL_THRESHOLD = 10;
+const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_SHOWN_IDS = 2000;
+
 // State
 const tabCounts = new Map(); // Track replacements per tab
 const shownIds = new Set(); // Track shown artworks to avoid repeats
+const shownIdQueue = [];
+const fetchInFlightByCategory = new Map();
 let lastSource = ''; // Track last source for variety
 
 // ===== Utility Functions =====
@@ -52,10 +65,26 @@ function normalizeCategory(category) {
  * Classify aspect ratio into three buckets for caching
  */
 function classifyAspect(width, height) {
+  if (!width || !height) return 'square';
   const ratio = width / height;
   if (ratio > 1.3) return 'landscape';
   if (ratio < 0.77) return 'portrait';
   return 'square';
+}
+
+/**
+ * Keep the in-memory seen-artworks set bounded.
+ */
+function markArtworkShown(artworkId) {
+  if (!artworkId || shownIds.has(artworkId)) return;
+
+  shownIds.add(artworkId);
+  shownIdQueue.push(artworkId);
+
+  while (shownIdQueue.length > MAX_SHOWN_IDS) {
+    const oldestId = shownIdQueue.shift();
+    if (oldestId) shownIds.delete(oldestId);
+  }
 }
 
 /**
@@ -305,7 +334,7 @@ async function storeArtworksInCache(artworks, category) {
     const existing = (await chrome.storage.local.get(key))[key] || [];
     const seen = new Set(existing.map(e => e.id));
     const merged = [...existing, ...entries.filter(e => !seen.has(e.id))];
-    const capped = merged.slice(-300); // Keep only last 300
+    const capped = merged.slice(-CACHE_MAX_ITEMS);
 
     await chrome.storage.local.set({ [key]: capped });
   }
@@ -316,21 +345,34 @@ async function storeArtworksInCache(artworks, category) {
  */
 async function fetchAndCache(category) {
   category = normalizeCategory(category);
-  const apis = CATEGORY_APIS[category] || CATEGORY_APIS.all;
-
-  // Fetch from all enabled APIs in parallel
-  const results = await Promise.all([
-    apis.includes('artic') ? fetchArtIC(category) : Promise.resolve([]),
-    apis.includes('met') ? fetchMetMuseum(category, 20) : Promise.resolve([]),
-    apis.includes('nasa') ? fetchNASA(40) : Promise.resolve([]),
-  ]);
-
-  const allArtworks = interleaveArrays(results);
-  if (allArtworks.length > 0) {
-    await storeArtworksInCache(allArtworks, category);
+  if (fetchInFlightByCategory.has(category)) {
+    return fetchInFlightByCategory.get(category);
   }
 
-  return allArtworks;
+  const apis = CATEGORY_APIS[category] || CATEGORY_APIS.all;
+
+  const task = (async () => {
+    // Fetch from all enabled APIs in parallel
+    const results = await Promise.all([
+      apis.includes('artic') ? fetchArtIC(category) : Promise.resolve([]),
+      apis.includes('met') ? fetchMetMuseum(category, 20) : Promise.resolve([]),
+      apis.includes('nasa') ? fetchNASA(40) : Promise.resolve([]),
+    ]);
+
+    const allArtworks = interleaveArrays(results);
+    if (allArtworks.length > 0) {
+      await storeArtworksInCache(allArtworks, category);
+    }
+
+    return allArtworks;
+  })();
+
+  fetchInFlightByCategory.set(category, task);
+  try {
+    return await task;
+  } finally {
+    fetchInFlightByCategory.delete(category);
+  }
 }
 
 /**
@@ -351,10 +393,15 @@ async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, t
 
     // Filter valid items (not expired, not shown)
     const now = Date.now();
-    const WEEK = 7 * 24 * 60 * 60 * 1000;
     const valid = items.filter(item =>
-      now - item.cachedAt < WEEK && !shownIds.has(item.id)
+      now - item.cachedAt < CACHE_MAX_AGE_MS && !shownIds.has(item.id)
     );
+
+    // Prune stale entries from storage opportunistically.
+    if (valid.length !== items.length) {
+      await chrome.storage.local.set({ [key]: valid });
+    }
+
     if (!valid.length) continue;
 
     // Prefer different source than last time
@@ -366,14 +413,14 @@ async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, t
     if (!artwork) continue;
 
     // Mark as used and update cache
-    shownIds.add(artwork.id);
+    markArtworkShown(artwork.id);
     lastSource = artwork.source;
 
     const remaining = items.filter(item => item.id !== artwork.id);
     await chrome.storage.local.set({ [key]: remaining });
 
     // Refill if cache getting low
-    if (remaining.length < 10) {
+    if (remaining.length < CACHE_REFILL_THRESHOLD) {
       fetchAndCache(category).catch(() => {});
     }
 
@@ -385,38 +432,56 @@ async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, t
 
 // ===== Message Handlers =====
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'GET_ART') {
-    handleGetArt(message).then(sendResponse);
-    return true;
-  }
+const messageHandlers = {
+  [MESSAGE_TYPE.GET_ART]: async (message) => handleGetArt(message),
 
-  if (message.type === 'INCREMENT_COUNT') {
+  [MESSAGE_TYPE.INCREMENT_COUNT]: async (_message, sender) => {
     const tabId = sender.tab?.id;
-    if (tabId) {
-      const count = (tabCounts.get(tabId) || 0) + 1;
-      tabCounts.set(tabId, count);
-      chrome.action.setBadgeBackgroundColor({ color: '#d9cfc6', tabId });
+    if (!tabId) return { ok: true };
 
-      // Update session counter
-      chrome.storage.session.get({ totalReplaced: 0 }).then(result => {
-        chrome.storage.session.set({ totalReplaced: result.totalReplaced + 1 });
-      });
+    const count = (tabCounts.get(tabId) || 0) + 1;
+    tabCounts.set(tabId, count);
+
+    try {
+      await chrome.action.setBadgeBackgroundColor({ color: '#d9cfc6', tabId });
+      await chrome.action.setBadgeText({ text: String(count), tabId });
+    } catch (e) {
+      // Ignore badge errors (e.g. tab closed during async updates).
     }
-    sendResponse({ ok: true });
-    return false;
-  }
 
-  if (message.type === 'GET_COUNT') {
-    chrome.storage.session.get({ totalReplaced: 0 }).then(response => {
-      sendResponse(response || { totalReplaced: 0 });
-    }).catch(() => {
-      sendResponse({ totalReplaced: 0 });
+    const current = await chrome.storage.session.get({ totalReplaced: 0 });
+    const totalReplaced = (current.totalReplaced || 0) + 1;
+    await chrome.storage.session.set({ totalReplaced });
+    return { ok: true, totalReplaced };
+  },
+
+  [MESSAGE_TYPE.GET_COUNT]: async () => {
+    const response = await chrome.storage.session.get({ totalReplaced: 0 });
+    return response || { totalReplaced: 0 };
+  },
+};
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const type = message?.type;
+  if (typeof type !== 'string') return false;
+
+  const handler = messageHandlers[type];
+  if (!handler) return false;
+
+  Promise.resolve(handler(message, sender))
+    .then(sendResponse)
+    .catch((error) => {
+      console.warn('[Art Replacer] Message handling error:', error);
+      if (type === MESSAGE_TYPE.GET_ART) {
+        sendResponse({ artwork: null });
+      } else if (type === MESSAGE_TYPE.GET_COUNT) {
+        sendResponse({ totalReplaced: 0 });
+      } else {
+        sendResponse({ ok: false });
+      }
     });
-    return true;
-  }
 
-  return false;
+  return true;
 });
 
 /**
@@ -424,6 +489,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
  */
 async function handleGetArt({ width, height, category }) {
   try {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return { artwork: null };
+    }
+
     category = normalizeCategory(category);
     const aspect = classifyAspect(width, height);
     const ratio = width / height;
