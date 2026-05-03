@@ -21,7 +21,11 @@ An extension that replaces ad slots with art from public museums.
 
 ### Privacy
 
-Ads Art collects nothing. It does not use analytics, accounts, telemetry, or browsing history. The only outbound requests go to the public museum and NASA API's with a generic search term.
+Ads Art does not collect any personally identifiable information.
+
+All processing happens locally on the user's machine. The extension analyzes page content and replaces detected ad slots in the browser, and it does not send user data to a server for processing.
+
+No data is sold or shared with third parties.
 
 ### Credits
 
