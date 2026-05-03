@@ -6,36 +6,8 @@
 // DOM elements
 const enabledToggle = document.getElementById('enabled');
 const powerToggleEl = document.querySelector('.power-toggle');
-const categoryButtons = [...document.querySelectorAll('[data-category]')];
-const countDisplay = document.getElementById('count');
-
-const VALID_CATEGORIES = ['all', 'art', 'nasa'];
-const DEFAULT_CATEGORY = 'all';
 
 let syncInProgress = false;
-
-/**
- * Normalize category to a valid value
- */
-function normalizeCategory(category) {
-  return VALID_CATEGORIES.includes(category) ? category : DEFAULT_CATEGORY;
-}
-
-/**
- * Update active button in category selector
- */
-function setActiveCategory(category) {
-  const normalized = normalizeCategory(category);
-
-  categoryButtons.forEach(button => {
-    const isActive = button.dataset.category === normalized;
-    button.classList.toggle('active', isActive);
-    button.setAttribute('aria-pressed', String(isActive));
-    button.disabled = syncInProgress;
-  });
-
-  return normalized;
-}
 
 /**
  * Update power toggle display state
@@ -50,13 +22,6 @@ function setPowerState(isEnabled) {
   if (label) {
     label.textContent = isEnabled ? 'on' : 'off';
   }
-}
-
-/**
- * Update counter display
- */
-function updateCounter(count) {
-  countDisplay.textContent = count || '0';
 }
 
 /**
@@ -84,25 +49,14 @@ async function saveSetting(key, value) {
 function updateUIState() {
   enabledToggle.disabled = syncInProgress;
   powerToggleEl.disabled = syncInProgress;
-  categoryButtons.forEach(btn => btn.disabled = syncInProgress);
 }
 
 // ===== Initialize =====
 
 // Load saved settings
-chrome.storage.sync.get({ enabled: true, category: 'all' }, (settings) => {
+chrome.storage.sync.get({ enabled: true }, (settings) => {
   enabledToggle.checked = settings.enabled;
   setPowerState(settings.enabled);
-
-  const category = setActiveCategory(settings.category);
-  if (category !== settings.category) {
-    chrome.storage.sync.set({ category });
-  }
-});
-
-// Load replacement counter
-chrome.runtime.sendMessage({ type: 'GET_COUNT' }, (response) => {
-  updateCounter(response?.totalReplaced ?? 0);
 });
 
 // ===== Event Listeners =====
@@ -113,11 +67,3 @@ enabledToggle.addEventListener('change', () => {
   saveSetting('enabled', enabledToggle.checked);
 });
 
-// Switch between art categories
-categoryButtons.forEach(button => {
-  button.addEventListener('click', () => {
-    if (syncInProgress) return;
-    const category = setActiveCategory(button.dataset.category);
-    saveSetting('category', category);
-  });
-});

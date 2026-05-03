@@ -8,7 +8,7 @@ const MAX_OBSERVER_ERRORS = 3;
 
 window.__artReplacer = window.__artReplacer || {};
 
-window.__artReplacer.startObserver = function(onAdFound) {
+window.__artReplacer.startObserver = function (onAdFound) {
   if (typeof onAdFound !== 'function') return null;
 
   const pendingElements = new Set();

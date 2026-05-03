@@ -8,36 +8,20 @@
 
 <body>
   <div class="popup">
-    <div class="header">
+    <header class="header">
       <div class="header-copy">
-        <h1>Ads Art</h1>
-        <p class="tagline">Turn ads into art</p>
+        <h1><b>Ads Art</b></h1>
+        <p class="tagline">Turns ads into art.</p>
       </div>
 
-      <label class="power-toggle">
+      <label class="power-toggle" aria-label="toggle Ads Art">
         <input type="checkbox" id="enabled" checked>
         <span class="power-toggle-ui"></span>
       </label>
-    </div>
-    <div class="stats">
-      <div class="stat">
-        <span class="stat-number" id="count">0</span>
-        <span class="stat-label">replaced today</span>
-      </div>
-    </div>
-
-
-    <div class="setting-row">
-      <div class="collection-toggle" role="group" aria-label="collection">
-        <button class="collection-button" type="button" data-category="all">All</button>
-        <button class="collection-button" type="button" data-category="art">Art</button>
-        <button class="collection-button" type="button" data-category="nasa">NASA</button>
-      </div>
-    </div>
-
-    <div class="footer">
-      <p>Art Institute of Chicago · The MET · NASA</p>
-    </div>
+    </header>
+    <footer class="footer">
+      <p>Art Institute of Chicago · The MET</p>
+    </footer>
   </div>
 
   <script src="popup.js"></script>

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Ads Art",
   "version": "1.0.0",
-  "description": "Turns ads into art pieces.",
+  "description": "Replaces ad slots with art from public museums.",
   "permissions": [
     "storage"
   ],

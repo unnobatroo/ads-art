@@ -4,11 +4,26 @@
   box-sizing: border-box;
 }
 
+:root {
+  --bg: #ffffff;
+  --text: #000000;
+  --text-strong: #000000;
+  --text-muted: #979797;
+  --border-soft: rgba(94, 84, 74, 0.14);
+  --toggle-bg: #f9f4ee;
+  --toggle-border: #d3d3d3;
+  --toggle-on-bg: #d4f0c8;
+  --toggle-on-border: #b8d0aa;
+  --toggle-off-bg: #f5c9c6;
+  --toggle-off-border: #d5aaa7;
+}
+
 body {
-  width: 300px;
-  font-family: 'Georgia', 'Garamond', 'Palatino', serif;
-  background: #f5f1ed;
-  color: #5a5450;
+  width: 250px;
+  min-height: 100%;
+  font-family: 'JetBrains Mono', 'Roboto Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
 }
 
 .popup {
@@ -22,28 +37,28 @@ body {
   gap: 12px;
   margin-bottom: 14px;
   padding-bottom: 12px;
-  border-bottom: 1.5px solid rgba(90, 84, 80, 0.15);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .header-copy {
   min-width: 0;
-  text-align: left;
 }
 
 .header h1 {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 400;
-  letter-spacing: 0.5px;
   line-height: 1.1;
-  color: #5a5450;
+  letter-spacing: 0.4px;
+  color: var(--text-strong);
 }
 
 .tagline {
-  font-size: 11px;
-  color: #9b8f87;
   margin-top: 4px;
-  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
   font-style: italic;
+  max-width: 186px;
 }
 
 .power-toggle {
@@ -51,25 +66,25 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid #d9cfc6;
-  border-radius: 2px;
-  background: #faf7f4;
-  color: #5a5450;
+  min-width: 52px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--toggle-border);
+  border-radius: 999px;
+  background: var(--toggle-bg);
+  color: var(--text-strong);
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
   line-height: 1;
 }
 
 .power-toggle:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  transform: none;
 }
 
 .power-toggle:disabled:hover {
-  background: #faf7f4;
+  transform: none;
 }
 
 .power-toggle input {
@@ -84,103 +99,26 @@ body {
   display: block;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 
 .power-toggle[data-state="on"] {
-  background: #bfffb4;
-  border-color: #c9b5a3;
+  --toggle-bg: var(--toggle-on-bg);
+  --toggle-border: var(--toggle-on-border);
 }
 
 .power-toggle[data-state="off"] {
-  background: #ffc0c0;
-  border-color: #d9cfc6;
-}
-
-.setting-row {
-  padding: 14px 0;
-  border-bottom: 1px solid rgba(90, 84, 80, 0.1);
-}
-
-.setting-label {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  color: #9b8f87;
-  text-transform: uppercase;
-  margin-bottom: 8px;
-}
-
-.collection-toggle {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.collection-button {
-  padding: 8px 0 7px;
-  border: 1px solid #d9cfc6;
-  border-radius: 2px;
-  background: #faf7f4;
-  color: #9b8f87;
-  font-size: 11px;
-  font-weight: 600;
-  font-family: 'Georgia', 'Garamond', 'Palatino', serif;
-  text-align: center;
-  letter-spacing: 0.3px;
-  cursor: pointer;
-  outline: none;
-  opacity: 1;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-}
-
-.collection-button:hover {
-  color: #7a7066;
-  background: #f0e8e2;
-}
-
-.collection-button.active {
-  background: #d9cfc6;
-  border-color: #c9b5a3;
-  color: #5a5450;
-}
-
-.collection-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.stats {
-  padding: 0 0 14px;
-  text-align: center;
-}
-
-.stat-number {
-  display: block;
-  font-size: 32px;
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: 0.5px;
-  color: #5a5450;
-}
-
-.stat-label {
-  display: block;
-  font-size: 11px;
-  color: #9b8f87;
-  margin-top: 6px;
-  font-style: italic;
+  --toggle-bg: var(--toggle-off-bg);
+  --toggle-border: var(--toggle-off-border);
 }
 
 .footer {
   text-align: center;
-  padding-top: 12px;
-  border-top: 1px solid rgba(90, 84, 80, 0.1);
 }
 
 .footer p {
   font-size: 9px;
-  color: #b5a89d;
-  line-height: 1.5;
+  line-height: 1.4;
+  color: var(--text-muted);
 }

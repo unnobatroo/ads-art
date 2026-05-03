@@ -8,7 +8,7 @@
   if (!AR) return;
 
   // Get extension settings
-  const settings = await chrome.storage.sync.get({ enabled: true, category: 'all' });
+  const settings = await chrome.storage.sync.get({ enabled: true });
   if (!settings.enabled) return;
 
   const MIN_DIMENSION = 50;
@@ -16,18 +16,23 @@
   const DEBUG = false; // Set to true for logging
   let replaceQueue = Promise.resolve();
 
+  function getDevicePixelRatio() {
+    return Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+  }
+
   /**
    * Build image URL for Art Institute of Chicago artwork
    * Crops if needed to match target aspect ratio
    */
   function buildArtImageUrl(artwork, slotWidth, slotHeight) {
     if (!artwork.imageId) {
-      return artwork.smallImageUrl || artwork.imageUrl || '';
+      return artwork.imageUrl || artwork.smallImageUrl || '';
     }
 
-    // Request higher resolution (up to 843x843)
-    const reqWidth = Math.min(Math.round(slotWidth * 2), 843);
-    const reqHeight = Math.min(Math.round(slotHeight * 2), 843);
+    // Request higher resolution and account for high-DPI displays.
+    const pixelRatio = getDevicePixelRatio();
+    const reqWidth = Math.min(Math.round(slotWidth * pixelRatio), 1600);
+    const reqHeight = Math.min(Math.round(slotHeight * pixelRatio), 1600);
 
     // If artwork dimensions unknown or ratios match, use full artwork
     if (!artwork.width || !artwork.height) {
@@ -138,7 +143,7 @@
         type: 'GET_ART',
         width,
         height,
-        category: settings.category,
+        category: 'all',
       });
 
       if (!response?.artwork) {
@@ -166,7 +171,6 @@
       }
 
       artContainer.dataset.artReplacer = 'replaced';
-      chrome.runtime.sendMessage({ type: 'INCREMENT_COUNT' }).catch(() => { });
 
     } catch (error) {
       if (DEBUG) console.warn('[Art Replacer] Failed to replace ad:', error);
@@ -215,9 +219,6 @@
     if (area === 'sync') {
       if (changes.enabled?.newValue === false) {
         location.reload();
-      }
-      if (changes.category) {
-        settings.category = changes.category.newValue;
       }
     }
   });

@@ -1,7 +1,7 @@
 /**
  * SERVICE WORKER
  * Manages caching and serves artwork to content scripts.
- * Fetches from: Art Institute of Chicago, The Metropolitan Museum, NASA
+ * Fetches from: Art Institute of Chicago, The Metropolitan Museum
  */
 
 // ===== API Configuration =====
@@ -9,33 +9,22 @@
 const APIS = {
   ARTIC: 'https://api.artic.edu/api/v1',
   MET: 'https://collectionapi.metmuseum.org/public/collection/v1',
-  NASA: 'https://images-api.nasa.gov',
 };
 
 // API query configurations by category
 const QUERIES = {
   artic: { all: 'painting', art: 'painting' },
   met: { all: 'painting', art: 'painting' },
-  nasa: [
-    'nebula hubble', 'galaxy hubble', 'pillars of creation',
-    'earth from space', 'aurora borealis ISS', 'saturn cassini',
-    'jupiter juno', 'astronaut spacewalk EVA', 'hubble deep field',
-    'carina nebula', 'orion nebula', 'andromeda galaxy',
-    'solar eclipse', 'earthrise', 'blue marble',
-  ],
 };
 
 // Which APIs to use per category
 const CATEGORY_APIS = {
-  all: ['artic', 'met', 'nasa'],
+  all: ['artic', 'met'],
   art: ['artic', 'met'],
-  nasa: ['nasa'],
 };
 
 const MESSAGE_TYPE = {
   GET_ART: 'GET_ART',
-  INCREMENT_COUNT: 'INCREMENT_COUNT',
-  GET_COUNT: 'GET_COUNT',
 };
 
 const CACHE_MAX_ITEMS = 300;
@@ -44,7 +33,6 @@ const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SHOWN_IDS = 2000;
 
 // State
-const tabCounts = new Map(); // Track replacements per tab
 const shownIds = new Set(); // Track shown artworks to avoid repeats
 const shownIdQueue = [];
 const fetchInFlightByCategory = new Map();
@@ -56,7 +44,6 @@ let lastSource = ''; // Track last source for variety
  * Normalize category to valid value
  */
 function normalizeCategory(category) {
-  if (category === 'nasa') return 'nasa';
   if (category === 'all' || category === 'art') return category;
   return 'art';
 }
@@ -226,63 +213,6 @@ async function fetchMetMuseum(category, count = 20) {
   }
 }
 
-/**
- * Fetch artworks from NASA
- */
-async function fetchNASA(count = 40) {
-  const query = QUERIES.nasa[Math.floor(Math.random() * QUERIES.nasa.length)];
-  const page = Math.floor(Math.random() * 50) + 1;
-
-  try {
-    const url = new URL(`${APIS.NASA}/search`);
-    url.searchParams.set('q', query);
-    url.searchParams.set('media_type', 'image');
-    url.searchParams.set('page_size', String(count));
-    url.searchParams.set('page', String(page));
-
-    const res = await fetch(url);
-    if (!res.ok) return [];
-
-    const data = await res.json();
-
-    // Filter out non-image content
-    const JUNK_KEYWORDS = [
-      'chart', 'graph', 'diagram', 'map', 'temperature', 'data',
-      'plot', 'spectrum', 'schematic', 'logo', 'headshot', 'group photo',
-    ];
-
-    return (data.collection?.items || [])
-      .filter(item => {
-        if (!item.links?.length || !item.links[0].href) return false;
-        const title = (item.data?.[0]?.title || '').toLowerCase();
-        if (JUNK_KEYWORDS.some(kw => title.includes(kw))) return false;
-        const href = item.links[0].href;
-        return !href.endsWith('.gif');
-      })
-      .map(item => {
-        const meta = item.data?.[0] || {};
-        const thumbUrl = item.links[0].href;
-        const fullUrl = thumbUrl.replace('~thumb', '~medium').replace('~small', '~medium');
-
-        return {
-          id: `nasa:${meta.nasa_id || Math.random().toString(36).slice(2)}`,
-          title: meta.title || 'NASA Image',
-          artist: meta.photographer || meta.secondary_creator || 'NASA',
-          date: meta.date_created ? meta.date_created.split('T')[0] : '',
-          source: 'NASA',
-          imageId: null,
-          imageUrl: fullUrl,
-          smallImageUrl: thumbUrl,
-          width: 1600,
-          height: 1200,
-        };
-      });
-  } catch (e) {
-    console.warn('[Art Replacer] NASA fetch error:', e);
-    return [];
-  }
-}
-
 // ===== Caching =====
 
 /**
@@ -356,7 +286,6 @@ async function fetchAndCache(category) {
     const results = await Promise.all([
       apis.includes('artic') ? fetchArtIC(category) : Promise.resolve([]),
       apis.includes('met') ? fetchMetMuseum(category, 20) : Promise.resolve([]),
-      apis.includes('nasa') ? fetchNASA(40) : Promise.resolve([]),
     ]);
 
     const allArtworks = interleaveArrays(results);
@@ -421,7 +350,7 @@ async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, t
 
     // Refill if cache getting low
     if (remaining.length < CACHE_REFILL_THRESHOLD) {
-      fetchAndCache(category).catch(() => {});
+      fetchAndCache(category).catch(() => { });
     }
 
     return artwork;
@@ -434,31 +363,6 @@ async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, t
 
 const messageHandlers = {
   [MESSAGE_TYPE.GET_ART]: async (message) => handleGetArt(message),
-
-  [MESSAGE_TYPE.INCREMENT_COUNT]: async (_message, sender) => {
-    const tabId = sender.tab?.id;
-    if (!tabId) return { ok: true };
-
-    const count = (tabCounts.get(tabId) || 0) + 1;
-    tabCounts.set(tabId, count);
-
-    try {
-      await chrome.action.setBadgeBackgroundColor({ color: '#d9cfc6', tabId });
-      await chrome.action.setBadgeText({ text: String(count), tabId });
-    } catch (e) {
-      // Ignore badge errors (e.g. tab closed during async updates).
-    }
-
-    const current = await chrome.storage.session.get({ totalReplaced: 0 });
-    const totalReplaced = (current.totalReplaced || 0) + 1;
-    await chrome.storage.session.set({ totalReplaced });
-    return { ok: true, totalReplaced };
-  },
-
-  [MESSAGE_TYPE.GET_COUNT]: async () => {
-    const response = await chrome.storage.session.get({ totalReplaced: 0 });
-    return response || { totalReplaced: 0 };
-  },
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -474,8 +378,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.warn('[Art Replacer] Message handling error:', error);
       if (type === MESSAGE_TYPE.GET_ART) {
         sendResponse({ artwork: null });
-      } else if (type === MESSAGE_TYPE.GET_COUNT) {
-        sendResponse({ totalReplaced: 0 });
       } else {
         sendResponse({ ok: false });
       }
@@ -502,7 +404,7 @@ async function handleGetArt({ width, height, category }) {
 
     // If cache miss, fetch new artworks
     if (!artwork) {
-      await fetchAndCache(category).catch(() => {});
+      await fetchAndCache(category).catch(() => { });
       artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
     }
 
@@ -519,22 +421,10 @@ chrome.runtime.onInstalled.addListener(async () => {
   try {
     // Pre-cache from multiple sources (parallel calls)
     await Promise.all([
-      fetchAndCache('all').catch(() => {}),
-      fetchAndCache('art').catch(() => {}),
-      fetchAndCache('nasa').catch(() => {}),
+      fetchAndCache('all').catch(() => { }),
     ]);
   } catch (error) {
     console.warn('[Art Replacer] Pre-cache error:', error);
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  tabCounts.delete(tabId);
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
-    tabCounts.set(tabId, 0);
-    chrome.action.setBadgeText({ text: '', tabId });
-  }
-});
