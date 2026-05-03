@@ -126,6 +126,14 @@ function looksLikeAd(element) {
   return textLength < 20 && hasMedia;
 }
 
+function isIgnoredElement(element) {
+  if (!element || element.nodeType !== Node.ELEMENT_NODE) return true;
+  if (element.dataset?.artReplacer) return true;
+  if (element.classList?.contains('art-replacer-container')) return true;
+  if (element.closest?.('.art-replacer-container')) return true;
+  return false;
+}
+
 /**
  * Find all ad elements in a container.
  */
@@ -137,12 +145,12 @@ function detectAds(container = document) {
   for (const selector of AD_SELECTORS) {
     try {
       // check if container itself matches
-      if (isElement && container.matches(selector) && !container.dataset.artReplacer) {
+      if (isElement && container.matches(selector) && !isIgnoredElement(container)) {
         found.add(container);
       }
       // find children matching selector
       container.querySelectorAll(selector).forEach(el => {
-        if (!el.dataset.artReplacer) found.add(el);
+        if (!isIgnoredElement(el)) found.add(el);
       });
     } catch (e) {
       // invalid selector, skip
@@ -153,11 +161,12 @@ function detectAds(container = document) {
   * Find elements by dimension heuristics.
   */
   const checkDimensions = (el) => {
-    if (found.has(el) || el.dataset.artReplacer) return;
+    if (found.has(el) || isIgnoredElement(el)) return;
     if (el.tagName !== 'IFRAME' && el.tagName !== 'DIV') return;
 
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
+    const rect = el.getBoundingClientRect();
+    const width = Math.round(rect.width || el.offsetWidth || 0);
+    const height = Math.round(rect.height || el.offsetHeight || 0);
     if (matchesAdDimension(width, height) && looksLikeAd(el)) {
       found.add(el);
     }
@@ -168,11 +177,11 @@ function detectAds(container = document) {
 
   // filter out nested duplicates and already processed ads
   return [...found].filter((el) => {
-    if (el.dataset.artReplacer) return false;
+    if (isIgnoredElement(el)) return false;
 
     let parent = el.parentElement;
     while (parent) {
-      if (found.has(parent) || parent.dataset?.artReplacer) return false;
+      if (found.has(parent) || isIgnoredElement(parent)) return false;
       parent = parent.parentElement;
     }
     return true;

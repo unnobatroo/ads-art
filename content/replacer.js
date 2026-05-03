@@ -17,7 +17,7 @@
   let replaceQueue = Promise.resolve();
 
   function getDevicePixelRatio() {
-    return Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+    return Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
   }
 
   /**
@@ -26,17 +26,17 @@
    */
   function buildArtImageUrl(artwork, slotWidth, slotHeight) {
     if (!artwork.imageId) {
-      return artwork.imageUrl || artwork.smallImageUrl || '';
+      return artwork.smallImageUrl || artwork.imageUrl || '';
     }
 
-    // Request higher resolution and account for high-DPI displays.
     const pixelRatio = getDevicePixelRatio();
-    const reqWidth = Math.min(Math.round(slotWidth * pixelRatio), 1600);
-    const reqHeight = Math.min(Math.round(slotHeight * pixelRatio), 1600);
+    const maxDim = 900;
+    const reqWidth = Math.min(Math.round(slotWidth * pixelRatio), maxDim);
+    const reqHeight = Math.min(Math.round(slotHeight * pixelRatio), maxDim);
 
     // If artwork dimensions unknown or ratios match, use full artwork
     if (!artwork.width || !artwork.height) {
-      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/${reqWidth},/0/default.jpg`;
+      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/!${reqWidth},${reqHeight}/0/default.jpg`;
     }
 
     // Check if aspect ratios are too different
@@ -46,7 +46,7 @@
 
     if (ratioDiff <= RATIO_TOLERANCE) {
       // Ratios match, use full artwork
-      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/${reqWidth},/0/default.jpg`;
+      return `https://www.artic.edu/iiif/2/${artwork.imageId}/full/!${reqWidth},${reqHeight}/0/default.jpg`;
     }
 
     // Crop artwork to match slot ratio
@@ -65,7 +65,7 @@
       cropY = 0;
     }
 
-    return `https://www.artic.edu/iiif/2/${artwork.imageId}/${cropX},${cropY},${cropWidth},${cropHeight}/${reqWidth},/0/default.jpg`;
+    return `https://www.artic.edu/iiif/2/${artwork.imageId}/${cropX},${cropY},${cropWidth},${cropHeight}/!${reqWidth},${reqHeight}/0/default.jpg`;
   }
 
   /**
@@ -103,6 +103,8 @@
     img.alt = `${artwork.title} by ${artwork.artist}`;
     img.className = 'art-replacer-image';
     img.style.cssText = `width:100%;height:100%;object-fit:${getObjectFit(slotWidth, slotHeight)};`;
+    img.loading = 'lazy';
+    img.decoding = 'async';
     container.appendChild(img);
 
     // artwork info
