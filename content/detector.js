@@ -75,8 +75,21 @@ const IAB_AD_SIZES = [
   [970, 250], [970, 90], [336, 280], [120, 600], [320, 100],
 ];
 
+const AD_SIGNAL_KEYWORDS = [
+  'ad',
+  'ads',
+  'advert',
+  'advertisement',
+  'sponsor',
+  'sponsored',
+  'outbrain',
+  'taboola',
+  'mgid',
+  'revcontent',
+];
+
 const MIN_AD_SIZE = 50;
-const SIZE_TOLERANCE = 0.15; // 15% tolerance for dimension matching
+const SIZE_TOLERANCE = 0.15; // for dimension matching
 
 // known ad network domains
 const AD_DOMAINS = [
@@ -105,6 +118,25 @@ function matchesAdDimension(width, height) {
 function isAdIframe(element) {
   const src = element.src || '';
   return AD_DOMAINS.some(domain => src.includes(domain));
+}
+
+/**
+ * Check whether an element has a strong ad-related signal in its own metadata.
+ */
+function hasAdSignal(element) {
+  const raw = [
+    element.className,
+    element.id,
+    element.getAttribute?.('aria-label'),
+    element.getAttribute?.('data-testid'),
+    element.getAttribute?.('role'),
+    element.getAttribute?.('title'),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return AD_SIGNAL_KEYWORDS.some(keyword => raw.includes(keyword));
 }
 
 /**
@@ -158,7 +190,7 @@ function detectAds(container = document) {
 
     const width = el.offsetWidth;
     const height = el.offsetHeight;
-    if (matchesAdDimension(width, height) && looksLikeAd(el)) {
+    if (matchesAdDimension(width, height) && looksLikeAd(el) && hasAdSignal(el)) {
       found.add(el);
     }
   };

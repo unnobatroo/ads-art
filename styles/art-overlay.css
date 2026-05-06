@@ -584,7 +584,7 @@ zeus-ad {
   background: rgba(10, 10, 10, 0.95);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   color: #fff;
-  font-family: 'Georgia', 'Garamond', 'Palatino', serif;
+  font-family: "PT Sans", "Georgia", serif;
   font-size: 11px;
   line-height: 1.4;
   opacity: 0;
@@ -596,14 +596,18 @@ zeus-ad {
   opacity: 1;
 }
 
-.art-replacer-tooltip strong {
+.art-replacer-title {
   font-size: 11px;
   font-weight: 600;
-  display: block;
+  margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.2px;
+}
+
+.art-replacer-meta {
+  margin-bottom: 0;
 }
 
 .art-replacer-source {

@@ -110,9 +110,9 @@
     tooltip.className = 'art-replacer-tooltip';
     const dateStr = artwork.date ? ` (${escapeHtml(artwork.date)})` : '';
     tooltip.innerHTML = `
-      <strong>${escapeHtml(artwork.title)}</strong><br>
-      ${escapeHtml(artwork.artist)}${dateStr}<br>
-      <span class="art-replacer-source">${escapeHtml(artwork.source)}</span>
+      <div class="art-replacer-title">${escapeHtml(artwork.title)}</div>
+      <div class="art-replacer-meta">${escapeHtml(artwork.artist)}${dateStr}</div>
+      <div class="art-replacer-source">${escapeHtml(artwork.source)}</div>
     `;
     container.appendChild(tooltip);
 
