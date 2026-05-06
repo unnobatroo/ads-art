@@ -3,116 +3,60 @@
  * Watches for newly added DOM elements and detects ads in them.
  */
 
+const DEBOUNCE_DELAY = 200; // ms to wait after mutations before processing
 const MAX_OBSERVER_ERRORS = 3;
-const IGNORE_TAGS = new Set(['br', 'head', 'link', 'meta', 'script', 'style']);
 
 window.__artReplacer = window.__artReplacer || {};
 
 window.__artReplacer.startObserver = function (onAdFound) {
   if (typeof onAdFound !== 'function') return null;
 
-  const addedNodeLists = [];
-  const removedNodeLists = [];
-  const addedNodes = [];
-  let removedNodes = false;
+  const pendingElements = new Set();
+  let debounceTimer = null;
   let errorCount = 0;
-  let flushTimer = null;
 
-  const scheduleFlush = (delayMs) => {
-    if (flushTimer !== null) return;
+  const flushPending = () => {
+    const newElements = [...pendingElements];
+    pendingElements.clear();
+    if (newElements.length === 0) return;
 
-    if (typeof delayMs === 'number') {
-      flushTimer = setTimeout(() => {
-        flushTimer = null;
-        flushPending();
-      }, delayMs);
-      return;
-    }
+    // skip our own art replacements
+    const filteredElements = newElements.filter(el =>
+      !el.classList?.contains('art-replacer-container')
+    );
 
-    flushTimer = requestAnimationFrame(() => {
-      flushTimer = null;
-      flushPending();
-    });
-  };
+    if (filteredElements.length === 0) return;
 
-  const collectAddedNodes = () => {
-    let i = addedNodeLists.length;
-    while (i--) {
-      const nodeList = addedNodeLists[i];
-      let j = nodeList.length;
-      while (j--) {
-        const node = nodeList[j];
-        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-        if (IGNORE_TAGS.has(node.localName)) continue;
-        if (node.parentElement === null) continue;
-        addedNodes.push(node);
-      }
-    }
-    addedNodeLists.length = 0;
-
-    i = removedNodeLists.length;
-    while (i-- && removedNodes === false) {
-      const nodeList = removedNodeLists[i];
-      let j = nodeList.length;
-      while (j--) {
-        if (nodeList[j].nodeType !== Node.ELEMENT_NODE) continue;
-        removedNodes = true;
-        break;
-      }
-    }
-    removedNodeLists.length = 0;
-  };
-
-  const collectAdsFromNodes = () => {
-    if (addedNodes.length === 0 && removedNodes === false) return;
-
+    // detect ads in newly added elements
     const detectAds = window.__artReplacer.detectAds;
-    if (!detectAds) {
-      addedNodes.length = 0;
-      removedNodes = false;
-      return;
-    }
+    if (!detectAds) return;
 
     const foundAds = new Set();
-    for (const node of addedNodes) {
-      if (node.classList?.contains('art-replacer-container')) continue;
-      if (node.closest?.('.art-replacer-container')) continue;
-
-      const ads = detectAds(node);
+    filteredElements.forEach(el => {
+      const ads = detectAds(el);
       if (Array.isArray(ads)) {
-        for (const ad of ads) foundAds.add(ad);
+        ads.forEach(ad => foundAds.add(ad));
       }
-    }
-
-    addedNodes.length = 0;
-    removedNodes = false;
+    });
 
     if (foundAds.size > 0) {
       onAdFound([...foundAds]);
     }
   };
 
-  const flushPending = () => {
-    collectAddedNodes();
-    collectAdsFromNodes();
-  };
-
   const observer = new MutationObserver((mutations) => {
     try {
-      let i = mutations.length;
-      while (i--) {
-        const mutation = mutations[i];
-        if (mutation.addedNodes.length !== 0) {
-          addedNodeLists.push(mutation.addedNodes);
-        }
-        if (mutation.removedNodes.length !== 0) {
-          removedNodeLists.push(mutation.removedNodes);
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            pendingElements.add(node);
+          }
         }
       }
 
-      if (addedNodeLists.length !== 0 || removedNodeLists.length !== 0) {
-        scheduleFlush(addedNodeLists.length < 100 ? 1 : undefined);
-      }
+      // debounce to avoid processing too frequently
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(flushPending, DEBOUNCE_DELAY);
     } catch (error) {
       errorCount++;
       if (errorCount >= MAX_OBSERVER_ERRORS) {
