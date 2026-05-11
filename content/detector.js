@@ -42,7 +42,6 @@ const AD_SELECTORS = [
   '[class*="sponsored_content"]',
   '[class*="sponsored-post"]',
   '[class*="native-ad"]',
-  '[data-testid*="ad"]',
   '[data-testid*="sponsored" i]',
   '[aria-label*="advertisement" i]',
   '[aria-label*="sponsored" i]',
