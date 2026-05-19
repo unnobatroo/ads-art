@@ -6,19 +6,6 @@ An extension that replaces ad slots with art from public museums.
 - Avoids repeating the same image in a session.
 - Shows a short tooltip with the artwork title, artist, date, and source.
 
-### Install for Chrome / Edge / Brave
-
-1. Clone the repo.
-2. Open `chrome://extensions`, enable **Developer mode.**
-3. Click **Load unpacked**, select the repo root.
-4. Visit any ad-supported site.
-
-### Install for Firefox
-
-1. Clone the repo.
-2. Run `./build.sh`.
-3. Open `about:debugging#/runtime/this-firefox` and load the unpacked add-on or zip.
-
 ## Privacy
 
 Ads Art does not collect any personally identifiable information.
