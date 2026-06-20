@@ -69,15 +69,6 @@
   }
 
   /**
-   * Escape HTML text to prevent XSS
-   */
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  /**
    * Determine how to fit image into slot.
    */
   function getObjectFit(slotWidth, slotHeight) {
@@ -87,8 +78,18 @@
     return (ratio > 3 || ratio < 0.33) ? 'cover' : 'contain';
   }
 
+  /** Create a tooltip line element with a class and text. */
+  function makeLine(className, text) {
+    const el = document.createElement('div');
+    el.className = className;
+    el.textContent = text;
+    return el;
+  }
+
   /**
    * Create DOM elements for art replacement.
+   * Built entirely with DOM APIs — no HTML strings — so untrusted artwork
+   * metadata can never be interpreted as markup.
    */
   function createArtContainer(artwork, slotWidth, slotHeight) {
     // container
@@ -97,9 +98,8 @@
     container.style.cssText = `width:${slotWidth}px;height:${slotHeight}px;position:relative;overflow:hidden;`;
 
     // img
-    const imageUrl = buildArtImageUrl(artwork, slotWidth, slotHeight);
     const img = document.createElement('img');
-    img.src = imageUrl;
+    img.src = buildArtImageUrl(artwork, slotWidth, slotHeight);
     img.alt = `${artwork.title} by ${artwork.artist}`;
     img.className = 'art-replacer-image';
     img.style.cssText = `width:100%;height:100%;object-fit:${getObjectFit(slotWidth, slotHeight)};`;
@@ -108,12 +108,10 @@
     // artwork info
     const tooltip = document.createElement('div');
     tooltip.className = 'art-replacer-tooltip';
-    const dateStr = artwork.date ? ` (${escapeHtml(artwork.date)})` : '';
-    tooltip.innerHTML = `
-      <div class="art-replacer-title">${escapeHtml(artwork.title)}</div>
-      <div class="art-replacer-meta">${escapeHtml(artwork.artist)}${dateStr}</div>
-      <div class="art-replacer-source">${escapeHtml(artwork.source)}</div>
-    `;
+    const dateStr = artwork.date ? ` (${artwork.date})` : '';
+    tooltip.appendChild(makeLine('art-replacer-title', artwork.title));
+    tooltip.appendChild(makeLine('art-replacer-meta', `${artwork.artist}${dateStr}`));
+    tooltip.appendChild(makeLine('art-replacer-source', artwork.source));
     container.appendChild(tooltip);
 
     return container;
@@ -165,8 +163,7 @@
         }
       } else {
         // for other elements clear contents and add container
-        adElement.innerHTML = '';
-        adElement.appendChild(artContainer);
+        adElement.replaceChildren(artContainer);
       }
 
       artContainer.dataset.artReplacer = 'replaced';
