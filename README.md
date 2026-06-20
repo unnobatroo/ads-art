@@ -2,7 +2,8 @@
 
 An extension that replaces ad slots with art from public museums.
 
-- Detects common ad slots, sponsored blocks, affiliate widgets, and newsletter prompts.
+- Detects common ad slots (Google/GPT, ad-network iframes, Taboola/Outbrain, and first-party `ad-*` containers) and replaces them with artwork.
+- Leaves site chrome — nav bars, headers, and search — untouched.
 - Avoids repeating the same image in a session.
 - Shows a short tooltip with the artwork title, artist, date, and source.
 

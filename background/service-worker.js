@@ -1,56 +1,31 @@
 /**
  * SERVICE WORKER
- * Manages caching and serves artwork to content scripts.
- * Fetches from: Art Institute of Chicago, The Metropolitan Museum
+ * Fetches artwork from public museum APIs, caches it by aspect ratio, and
+ * serves a best-fit piece to the content script on request.
+ * Sources: Art Institute of Chicago, The Metropolitan Museum of Art.
  */
 
-// ===== API Configuration =====
+// ===== Configuration =====
 
-const APIS = {
-  ARTIC: 'https://api.artic.edu/api/v1',
-  MET: 'https://collectionapi.metmuseum.org/public/collection/v1',
-};
-
-// API query configurations by category
-const QUERIES = {
-  artic: { all: 'painting', art: 'painting' },
-  met: { all: 'painting', art: 'painting' },
-};
-
-// Which APIs to use per category
-const CATEGORY_APIS = {
-  all: ['artic', 'met'],
-  art: ['artic', 'met'],
-};
-
-const MESSAGE_TYPE = {
-  GET_ART: 'GET_ART',
-};
+const ARTIC_API = 'https://api.artic.edu/api/v1';
+const MET_API = 'https://collectionapi.metmuseum.org/public/collection/v1';
+const QUERY = 'painting';
 
 const CACHE_MAX_ITEMS = 300;
 const CACHE_REFILL_THRESHOLD = 10;
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SHOWN_IDS = 2000;
 
-// State
-const shownIds = new Set(); // Track shown artworks to avoid repeats
-const shownIdQueue = [];
-const fetchInFlightByCategory = new Map();
-let lastSource = ''; // Track last source for variety
+// ===== State =====
 
-// ===== Utility Functions =====
+const shownIds = new Set();   // artwork ids already shown, to avoid repeats
+const shownIdQueue = [];      // FIFO mirror of shownIds for bounded eviction
+let fetchInFlight = null;      // de-dupes concurrent network refills
+let lastSource = '';           // alternate sources for variety
 
-/**
- * Normalize category to valid value
- */
-function normalizeCategory(category) {
-  if (category === 'all' || category === 'art') return category;
-  return 'art';
-}
+// ===== Helpers =====
 
-/**
- * Classify aspect ratio into three buckets for caching
- */
+/** Bucket an aspect ratio into one of three cache lanes. */
 function classifyAspect(width, height) {
   if (!width || !height) return 'square';
   const ratio = width / height;
@@ -59,90 +34,72 @@ function classifyAspect(width, height) {
   return 'square';
 }
 
-/**
- * Keep the in-memory seen-artworks set bounded.
- */
-function markArtworkShown(artworkId) {
-  if (!artworkId || shownIds.has(artworkId)) return;
-
-  shownIds.add(artworkId);
-  shownIdQueue.push(artworkId);
-
+/** Record an artwork as shown, keeping the set bounded. */
+function markArtworkShown(id) {
+  if (!id || shownIds.has(id)) return;
+  shownIds.add(id);
+  shownIdQueue.push(id);
   while (shownIdQueue.length > MAX_SHOWN_IDS) {
-    const oldestId = shownIdQueue.shift();
-    if (oldestId) shownIds.delete(oldestId);
+    shownIds.delete(shownIdQueue.shift());
   }
 }
 
-/**
- * Score artwork based on aspect ratio and size fit
- */
-function scoreArtwork(artwork, targetRatio, targetWidth, targetHeight) {
-  if (!artwork.width || !artwork.height) return 999; // No dimensions, low priority
+/** Lower score = better fit. Prioritises aspect ratio, then comparable size. */
+function scoreArtwork(art, targetRatio, targetWidth, targetHeight) {
+  if (!art.width || !art.height) return 999;
 
-  const artRatio = artwork.width / artwork.height;
-  const ratioDiff = Math.abs(artRatio - targetRatio);
+  let score = Math.abs(art.width / art.height - targetRatio) * 0.8;
 
-  // Ratio is most important
-  let score = ratioDiff * 0.8;
-
-  // Size penalty for very small or large artworks
   if (targetWidth > 0 && targetHeight > 0) {
-    const artArea = artwork.width * artwork.height;
+    const artArea = art.width * art.height;
     const targetArea = targetWidth * targetHeight;
-
-    // Penalize if too small or too large
-    if (artArea < targetArea * 0.5 || artArea > targetArea * 3) {
-      const sizePenalty = artArea < targetArea * 0.5
-        ? (targetArea * 0.5 - artArea) / (targetArea * 0.5)
-        : (artArea - targetArea * 3) / (targetArea * 3);
-      score += Math.min(sizePenalty, 1) * 0.2;
+    if (artArea < targetArea * 0.5) {
+      score += Math.min((targetArea * 0.5 - artArea) / (targetArea * 0.5), 1) * 0.2;
+    } else if (artArea > targetArea * 3) {
+      score += Math.min((artArea - targetArea * 3) / (targetArea * 3), 1) * 0.2;
     }
   }
-
   return score;
 }
 
-/**
- * Pick best matching artwork from candidates
- */
+/** Pick the best-fitting artwork from a list of candidates. */
 function pickBestArtwork(artworks, targetRatio, targetWidth, targetHeight) {
   const withDims = artworks.filter(a => a.width && a.height);
   if (withDims.length === 0) {
     return artworks[Math.floor(Math.random() * artworks.length)];
   }
-
-  // Sort by score and return best
-  const scored = withDims.map(art => ({
-    art,
-    score: scoreArtwork(art, targetRatio, targetWidth, targetHeight),
-  }));
-
-  scored.sort((a, b) => a.score - b.score);
-  return scored[0].art;
+  return withDims
+    .map(art => ({ art, score: scoreArtwork(art, targetRatio, targetWidth, targetHeight) }))
+    .sort((a, b) => a.score - b.score)[0].art;
 }
 
-// ===== API Fetchers =====
+/** Round-robin merge of several arrays so sources stay mixed. */
+function interleave(arrays) {
+  const result = [];
+  const maxLen = Math.max(0, ...arrays.map(a => a.length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const arr of arrays) {
+      if (i < arr.length) result.push(arr[i]);
+    }
+  }
+  return result;
+}
 
-/**
- * Fetch artworks from Art Institute of Chicago
- */
-async function fetchArtIC(category) {
-  const query = QUERIES.artic[normalizeCategory(category)];
-  const page = Math.floor(Math.random() * 200) + 1;
+// ===== API fetchers =====
 
+async function fetchArtIC() {
   try {
-    const url = new URL(`${APIS.ARTIC}/artworks/search`);
-    url.searchParams.set('q', query);
+    const url = new URL(`${ARTIC_API}/artworks/search`);
+    url.searchParams.set('q', QUERY);
     url.searchParams.set('fields', 'id,title,artist_display,date_display,image_id,thumbnail');
     url.searchParams.set('limit', '40');
-    url.searchParams.set('page', String(page));
+    url.searchParams.set('page', String(Math.floor(Math.random() * 200) + 1));
 
     const res = await fetch(url);
     if (!res.ok) return [];
 
-    const data = await res.json();
-    return (data.data || [])
+    const { data = [] } = await res.json();
+    return data
       .filter(item => item.image_id)
       .map(item => ({
         id: `artic:${item.id}`,
@@ -157,37 +114,27 @@ async function fetchArtIC(category) {
         height: item.thumbnail?.height || 0,
       }));
   } catch (e) {
-    console.warn('[Art Replacer] AIC fetch error:', e);
+    console.warn('[Ads Art] AIC fetch error:', e);
     return [];
   }
 }
 
-/**
- * Fetch artworks from The Metropolitan Museum of Art
- */
-async function fetchMetMuseum(category, count = 20) {
-  const query = QUERIES.met[normalizeCategory(category)];
-
+async function fetchMetMuseum(count = 20) {
   try {
-    const searchUrl = new URL(`${APIS.MET}/search`);
+    const searchUrl = new URL(`${MET_API}/search`);
     searchUrl.searchParams.set('hasImages', 'true');
-    searchUrl.searchParams.set('q', query);
+    searchUrl.searchParams.set('q', QUERY);
 
     const searchRes = await fetch(searchUrl);
     if (!searchRes.ok) return [];
 
-    const searchData = await searchRes.json();
-    const objectIDs = searchData.objectIDs || [];
+    const { objectIDs = [] } = await searchRes.json();
     if (objectIDs.length === 0) return [];
 
-    // Shuffle and select random objects
-    const shuffled = [...objectIDs].sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, count);
-
-    // Fetch details for each object
+    const selected = [...objectIDs].sort(() => Math.random() - 0.5).slice(0, count);
     const objects = await Promise.all(
       selected.map(id =>
-        fetch(`${APIS.MET}/objects/${id}`)
+        fetch(`${MET_API}/objects/${id}`)
           .then(r => r.ok ? r.json() : null)
           .catch(() => null)
       )
@@ -208,223 +155,136 @@ async function fetchMetMuseum(category, count = 20) {
         height: 0,
       }));
   } catch (e) {
-    console.warn('[Art Replacer] Met fetch error:', e);
+    console.warn('[Ads Art] Met fetch error:', e);
     return [];
   }
 }
 
-// ===== Caching =====
+// ===== Cache =====
 
-/**
- * Interleave arrays to mix sources
- */
-function interleaveArrays(arrays) {
-  const result = [];
-  const maxLen = Math.max(...arrays.map(a => a.length));
+const cacheKey = (aspect) => `cache:${aspect}`;
 
-  for (let i = 0; i < maxLen; i++) {
-    for (const arr of arrays) {
-      if (i < arr.length) result.push(arr[i]);
-    }
-  }
-
-  return result;
-}
-
-/**
- * Store artworks in cache by aspect ratio bucket
- */
-async function storeArtworksInCache(artworks, category) {
+/** Store new artworks into their aspect-ratio lanes. */
+async function storeArtworks(artworks) {
   if (!artworks?.length) return;
 
   const buckets = { landscape: [], portrait: [], square: [] };
-
-  // Distribute artworks into buckets
   for (const art of artworks) {
     if (shownIds.has(art.id)) continue;
-
     const entry = { ...art, cachedAt: Date.now() };
-
     if (art.width && art.height) {
-      const aspect = classifyAspect(art.width, art.height);
-      buckets[aspect].push(entry);
+      buckets[classifyAspect(art.width, art.height)].push(entry);
     } else {
-      // Unknown dimensions, add to all buckets
+      // Unknown dimensions can fit any lane.
       buckets.landscape.push(entry);
       buckets.portrait.push(entry);
       buckets.square.push(entry);
     }
   }
 
-  // Save to Chrome storage
   for (const [aspect, entries] of Object.entries(buckets)) {
     if (entries.length === 0) continue;
-
-    const key = `cache:${category}:${aspect}`;
+    const key = cacheKey(aspect);
     const existing = (await chrome.storage.local.get(key))[key] || [];
     const seen = new Set(existing.map(e => e.id));
     const merged = [...existing, ...entries.filter(e => !seen.has(e.id))];
-    const capped = merged.slice(-CACHE_MAX_ITEMS);
-
-    await chrome.storage.local.set({ [key]: capped });
+    await chrome.storage.local.set({ [key]: merged.slice(-CACHE_MAX_ITEMS) });
   }
 }
 
-/**
- * Fetch artworks from all enabled APIs and cache them
- */
-async function fetchAndCache(category) {
-  category = normalizeCategory(category);
-  if (fetchInFlightByCategory.has(category)) {
-    return fetchInFlightByCategory.get(category);
-  }
+/** Fetch from all sources and cache the results (de-duped while in flight). */
+function fetchAndCache() {
+  if (fetchInFlight) return fetchInFlight;
 
-  const apis = CATEGORY_APIS[category] || CATEGORY_APIS.all;
+  fetchInFlight = (async () => {
+    const results = await Promise.all([fetchArtIC(), fetchMetMuseum()]);
+    const artworks = interleave(results);
+    if (artworks.length > 0) await storeArtworks(artworks);
+    return artworks;
+  })().finally(() => { fetchInFlight = null; });
 
-  const task = (async () => {
-    // Fetch from all enabled APIs in parallel
-    const results = await Promise.all([
-      apis.includes('artic') ? fetchArtIC(category) : Promise.resolve([]),
-      apis.includes('met') ? fetchMetMuseum(category, 20) : Promise.resolve([]),
-    ]);
-
-    const allArtworks = interleaveArrays(results);
-    if (allArtworks.length > 0) {
-      await storeArtworksInCache(allArtworks, category);
-    }
-
-    return allArtworks;
-  })();
-
-  fetchInFlightByCategory.set(category, task);
-  try {
-    return await task;
-  } finally {
-    fetchInFlightByCategory.delete(category);
-  }
+  return fetchInFlight;
 }
 
-/**
- * Pop one artwork from cache that matches the requested aspect
- */
-async function getArtworkFromCache(aspect, category, targetRatio, targetWidth, targetHeight) {
-  // Try buckets in order: exact aspect, then other aspects
-  const bucketOrder = [aspect];
-  if (aspect !== 'square') bucketOrder.push('square');
-  if (aspect === 'landscape') bucketOrder.push('portrait');
-  if (aspect === 'portrait') bucketOrder.push('landscape');
+/** Take one best-fit, unseen artwork from the cache, preferring `aspect`. */
+async function takeFromCache(aspect, targetRatio, targetWidth, targetHeight) {
+  // Try the matching lane first, then fall back to the others.
+  const lanes = [aspect, ...['landscape', 'portrait', 'square'].filter(a => a !== aspect)];
 
-  for (const bucket of bucketOrder) {
-    const key = `cache:${category}:${bucket}`;
-    const result = await chrome.storage.local.get(key);
-    const items = result[key];
+  for (const lane of lanes) {
+    const key = cacheKey(lane);
+    const items = (await chrome.storage.local.get(key))[key];
     if (!items?.length) continue;
 
-    // Filter valid items (not expired, not shown)
     const now = Date.now();
     const valid = items.filter(item =>
       now - item.cachedAt < CACHE_MAX_AGE_MS && !shownIds.has(item.id)
     );
 
-    // Prune stale entries from storage opportunistically.
-    if (valid.length !== items.length) {
-      await chrome.storage.local.set({ [key]: valid });
+    if (!valid.length) {
+      // Nothing usable here — persist the pruning if anything was dropped.
+      if (valid.length !== items.length) await chrome.storage.local.set({ [key]: valid });
+      continue;
     }
 
-    if (!valid.length) continue;
-
-    // Prefer different source than last time
+    // Prefer a different source than last time for variety.
     const fromOtherSource = valid.filter(item => item.source !== lastSource);
     const candidates = fromOtherSource.length > 0 ? fromOtherSource : valid;
 
-    // Pick best match
     const artwork = pickBestArtwork(candidates, targetRatio, targetWidth, targetHeight);
     if (!artwork) continue;
 
-    // Mark as used and update cache
     markArtworkShown(artwork.id);
     lastSource = artwork.source;
 
-    const remaining = items.filter(item => item.id !== artwork.id);
+    // Persist the lane minus stale entries and the one we just used.
+    const remaining = valid.filter(item => item.id !== artwork.id);
     await chrome.storage.local.set({ [key]: remaining });
 
-    // Refill if cache getting low
     if (remaining.length < CACHE_REFILL_THRESHOLD) {
-      fetchAndCache(category).catch(() => { });
+      fetchAndCache().catch(() => {});
     }
-
     return artwork;
   }
 
   return null;
 }
 
-// ===== Message Handlers =====
+// ===== Message handling =====
 
-const messageHandlers = {
-  [MESSAGE_TYPE.GET_ART]: async (message) => handleGetArt(message),
-};
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const type = message?.type;
-  if (typeof type !== 'string') return false;
-
-  const handler = messageHandlers[type];
-  if (!handler) return false;
-
-  Promise.resolve(handler(message, sender))
-    .then(sendResponse)
-    .catch((error) => {
-      console.warn('[Art Replacer] Message handling error:', error);
-      if (type === MESSAGE_TYPE.GET_ART) {
-        sendResponse({ artwork: null });
-      } else {
-        sendResponse({ ok: false });
-      }
-    });
-
-  return true;
-});
-
-/**
- * Handle art request from content script
- */
-async function handleGetArt({ width, height, category }) {
-  try {
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-      return { artwork: null };
-    }
-
-    category = normalizeCategory(category);
-    const aspect = classifyAspect(width, height);
-    const ratio = width / height;
-
-    // Try to get from cache
-    let artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
-
-    // If cache miss, fetch new artworks
-    if (!artwork) {
-      await fetchAndCache(category).catch(() => { });
-      artwork = await getArtworkFromCache(aspect, category, ratio, width, height);
-    }
-
-    return artwork ? { artwork } : { artwork: null };
-  } catch (error) {
-    console.warn('[Art Replacer] Failed to get artwork:', error);
+async function handleGetArt({ width, height }) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return { artwork: null };
   }
+
+  const aspect = classifyAspect(width, height);
+  const ratio = width / height;
+
+  let artwork = await takeFromCache(aspect, ratio, width, height);
+  if (!artwork) {
+    await fetchAndCache().catch(() => {});
+    artwork = await takeFromCache(aspect, ratio, width, height);
+  }
+  return { artwork: artwork || null };
 }
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'GET_ART') return false;
+
+  handleGetArt(message)
+    .then(sendResponse)
+    .catch((error) => {
+      console.warn('[Ads Art] Message handling error:', error);
+      sendResponse({ artwork: null });
+    });
+
+  return true; // response is async
+});
 
 // ===== Lifecycle =====
 
-chrome.runtime.onInstalled.addListener(async () => {
-  try {
-    // Pre-cache from multiple sources (parallel calls)
-    await Promise.all([
-      fetchAndCache('all').catch(() => { }),
-    ]);
-  } catch (error) {
-    console.warn('[Art Replacer] Pre-cache error:', error);
-  }
+chrome.runtime.onInstalled.addListener(() => {
+  fetchAndCache().catch((error) => {
+    console.warn('[Ads Art] Pre-cache error:', error);
+  });
 });
-

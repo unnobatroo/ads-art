@@ -1,58 +1,28 @@
 /**
  * AD DETECTOR
- * Finds ad elements on the page using CSS selectors and heuristics.
+ * Finds ad slots on a page using a curated selector list plus a size heuristic.
+ * Site chrome (nav bars, headers, search) is explicitly protected, so it is
+ * never mistaken for an ad.
  */
 
-// CSS selectors to match ad elements by class, id, or data attributes
+// Precise, ad-tech-specific selectors. Hyphenated `ad-*` matches are safe from
+// ordinary words; bare substrings like "ad" are deliberately avoided.
 const AD_SELECTORS = [
-  // google ads
+  // Google / GPT slots
   'ins.adsbygoogle',
   '[id^="google_ads"]',
   '[id^="div-gpt-ad"]',
+  '[id^="gpt-ad"]',
   '[data-ad-slot]',
   '[data-ad-client]',
+  '[data-ad-format]',
+  '[data-ad-unit-path]',
+  '[data-google-query-id]',
+
+  // Ad-network iframes
   'iframe[src*="doubleclick.net"]',
   'iframe[src*="googlesyndication.com"]',
   'iframe[src*="googleadservices.com"]',
-
-  // generic ad patterns
-  '[class*="ad-container"]',
-  '[class*="ad-wrapper"]',
-  '[class*="ad-banner"]',
-  '[class*="ad-unit"]',
-  '[class*="ad-slot"]',
-  '[class*="advert-"]',
-  '[class*="advertisement"]',
-  '[id*="ad-container"]',
-  '[id*="ad-wrapper"]',
-  '[id*="ad-banner"]',
-
-  // content recommendation networks
-  '[id*="taboola"]',
-  '[class*="taboola"]',
-  '[id*="outbrain"]',
-  '[class*="outbrain"]',
-  '[class*="mgid"]',
-  '[id*="mgid"]',
-  '[class*="revcontent"]',
-  '[id*="revcontent"]',
-
-  // sponsored content
-  '[class*="sponsored-content"]',
-  '[class*="sponsored_content"]',
-  '[class*="sponsored-post"]',
-  '[class*="native-ad"]',
-  '[data-testid*="sponsored" i]',
-  '[aria-label*="advertisement" i]',
-  '[aria-label*="sponsored" i]',
-
-  // ad network attributes
-  '[data-ad-format]',
-  '[data-ad-unit-path]',
-  '[data-slot]',
-  '[pbadslot]',
-
-  // amazon and other ad iframes
   'iframe[src*="amazon-adsystem.com"]',
   'iframe[src*="adnxs.com"]',
   'iframe[src*="criteo.com"]',
@@ -62,145 +32,109 @@ const AD_SELECTORS = [
   'iframe[src*="openx.net"]',
   'iframe[src*="casalemedia.com"]',
 
-  // animated GIFs and Flash banners
-  'img[src*=".gif" i]',
-  'object[type="application/x-shockwave-flash"]',
-  'embed[type="application/x-shockwave-flash"]',
+  // Content-recommendation widgets (brand names → safe)
+  '[class*="taboola"]', '[id*="taboola"]',
+  '[class*="outbrain"]', '[id*="outbrain"]',
+
+  // First-party ad containers
+  '[class*="ad-container"]', '[id*="ad-container"]',
+  '[class*="ad-wrapper"]', '[id*="ad-wrapper"]',
+  '[class*="ad-banner"]', '[id*="ad-banner"]',
+  '[class*="ad-slot"]',
+  '[class*="ad-unit"]',
+  '[class*="advertisement"]',
+
+  // Custom ad elements
+  'ad-slot', 'amp-ad', 'gpt-ad',
 ];
 
-// standard IAB ad dimensions (width x height)
+const SELECTOR_QUERY = AD_SELECTORS.join(',');
+
+// Containers we must never touch, even if a descendant class coincidentally
+// matches an ad selector.
+const PROTECTED_SELECTOR =
+  'header, nav, [role="banner"], [role="navigation"], [role="search"], [role="menubar"]';
+
+// Standard IAB ad sizes (w × h), used as a structural fallback.
 const IAB_AD_SIZES = [
   [728, 90], [300, 250], [160, 600], [320, 50], [300, 600],
   [970, 250], [970, 90], [336, 280], [120, 600], [320, 100],
 ];
 
-const AD_SIGNAL_KEYWORDS = [
-  'ad',
-  'ads',
-  'advert',
-  'advertisement',
-  'sponsor',
-  'sponsored',
-  'outbrain',
-  'taboola',
-  'mgid',
-  'revcontent',
-];
-
 const MIN_AD_SIZE = 50;
-const SIZE_TOLERANCE = 0.15; // for dimension matching
+const SIZE_TOLERANCE = 0.15;
 
-// known ad network domains
-const AD_DOMAINS = [
-  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-  'adnxs.com', 'amazon-adsystem.com', 'taboola.com', 'outbrain.com',
-  'criteo.com', 'moatads.com', 'rubiconproject.com', 'pubmatic.com',
-  'openx.net', 'casalemedia.com', 'serving-sys.com', 'adform.net',
-];
+// Word-bounded ad hint; avoids matching "header", "download", "thread", etc.
+const AD_HINT = /(?:^|[^a-z])(ads?|advert|advertisement|sponsored?|promo|banner)(?:[^a-z]|$)/i;
 
-/**
- * Check if an element's dimensions match standard ad sizes.
- */
-function matchesAdDimension(width, height) {
-  if (width < MIN_AD_SIZE || height < MIN_AD_SIZE) return false;
-
-  return IAB_AD_SIZES.some(([stdWidth, stdHeight]) => {
-    const widthMatch = Math.abs(width - stdWidth) / stdWidth <= SIZE_TOLERANCE;
-    const heightMatch = Math.abs(height - stdHeight) / stdHeight <= SIZE_TOLERANCE;
-    return widthMatch && heightMatch;
-  });
+function isProtected(el) {
+  return !!el.closest?.(PROTECTED_SELECTOR);
 }
 
-/**
- * Check if an iframe's source domain is a known ad network.
- */
-function isAdIframe(element) {
-  const src = element.src || '';
-  return AD_DOMAINS.some(domain => src.includes(domain));
-}
-
-/**
- * Check whether an element has a strong ad-related signal in its own metadata.
- */
-function hasAdSignal(element) {
-  const raw = [
-    element.className,
-    element.id,
-    element.getAttribute?.('aria-label'),
-    element.getAttribute?.('data-testid'),
-    element.getAttribute?.('role'),
-    element.getAttribute?.('title'),
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
-  return AD_SIGNAL_KEYWORDS.some(keyword => raw.includes(keyword));
-}
-
-/**
- * Use heuristics to determine if an element looks like an ad.
- */
-function looksLikeAd(element) {
-  if (element.tagName === 'IFRAME') {
-    return isAdIframe(element);
+function safeMatches(el, selector) {
+  try {
+    return el.matches(selector);
+  } catch {
+    return false;
   }
+}
 
-  // check if contains ad network iframes
-  const hasAdIframe = Array.from(element.querySelectorAll('iframe'))
-    .some(frame => isAdIframe(frame));
-  if (hasAdIframe) return true;
+function matchesAdSize(width, height) {
+  if (width < MIN_AD_SIZE || height < MIN_AD_SIZE) return false;
+  return IAB_AD_SIZES.some(([w, h]) =>
+    Math.abs(width - w) / w <= SIZE_TOLERANCE &&
+    Math.abs(height - h) / h <= SIZE_TOLERANCE
+  );
+}
 
-  // small text + media = likely ad
-  const textLength = (element.textContent?.trim() || '').length;
-  const hasMedia = !!element.querySelector('img, iframe');
-  return textLength < 20 && hasMedia;
+function hasAdHint(el) {
+  const meta = [
+    el.className, el.id,
+    el.getAttribute?.('aria-label'),
+    el.getAttribute?.('data-testid'),
+  ].filter(Boolean).join(' ');
+  return AD_HINT.test(meta);
+}
+
+// A standard-sized, media-heavy block that also carries an ad hint is very
+// likely an unlabelled ad slot.
+function looksLikeAdBySize(el) {
+  if (el.tagName !== 'IFRAME' && el.tagName !== 'DIV') return false;
+  if (!matchesAdSize(el.offsetWidth, el.offsetHeight)) return false;
+  if (!hasAdHint(el)) return false;
+  if (el.tagName === 'IFRAME') return true;
+  const textLength = (el.textContent?.trim() || '').length;
+  return textLength < 20 && !!el.querySelector('img, iframe');
 }
 
 /**
- * Find all ad elements in a container.
+ * Find all replaceable ad slots within a container.
  */
 function detectAds(container = document) {
   const found = new Set();
   const isElement = container.nodeType === Node.ELEMENT_NODE;
 
-  // find elements matching CSS selectors
-  for (const selector of AD_SELECTORS) {
-    try {
-      // check if container itself matches
-      if (isElement && container.matches(selector) && !container.dataset.artReplacer) {
-        found.add(container);
-      }
-      // find children matching selector
-      container.querySelectorAll(selector).forEach(el => {
-        if (!el.dataset.artReplacer) found.add(el);
-      });
-    } catch (e) {
-      // invalid selector, skip
-    }
-  }
-
-  /**
-  * Find elements by dimension heuristics.
-  */
-  const checkDimensions = (el) => {
-    if (found.has(el) || el.dataset.artReplacer) return;
-    if (el.tagName !== 'IFRAME' && el.tagName !== 'DIV') return;
-
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
-    if (matchesAdDimension(width, height) && looksLikeAd(el) && hasAdSignal(el)) {
-      found.add(el);
-    }
+  const add = (el) => {
+    if (el && !el.dataset.artReplacer && !isProtected(el)) found.add(el);
   };
 
-  if (isElement) checkDimensions(container);
-  container.querySelectorAll('iframe, div').forEach(checkDimensions);
+  // 1. Selector matches (precise).
+  if (isElement && safeMatches(container, SELECTOR_QUERY)) add(container);
+  try {
+    container.querySelectorAll(SELECTOR_QUERY).forEach(add);
+  } catch {
+    // invalid selector list — should not happen, but never throw
+  }
 
-  // filter out nested duplicates and already processed ads
+  // 2. Size + hint heuristic (catches unlabelled slots).
+  const considerBySize = (el) => {
+    if (!found.has(el) && looksLikeAdBySize(el)) add(el);
+  };
+  if (isElement) considerBySize(container);
+  container.querySelectorAll('iframe, div').forEach(considerBySize);
+
+  // 3. Drop anything nested inside another match or an existing replacement.
   return [...found].filter((el) => {
-    if (el.dataset.artReplacer) return false;
-
     let parent = el.parentElement;
     while (parent) {
       if (found.has(parent) || parent.dataset?.artReplacer) return false;
@@ -210,6 +144,5 @@ function detectAds(container = document) {
   });
 }
 
-// export detection function
 window.__artReplacer = window.__artReplacer || {};
 window.__artReplacer.detectAds = detectAds;

@@ -143,7 +143,6 @@
         type: 'GET_ART',
         width,
         height,
-        category: 'all',
       });
 
       if (!response?.artwork) {
@@ -214,12 +213,10 @@
     });
   }
 
-  // react to settings changes
+  // reload when the user flips the toggle so the change applies immediately
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === 'sync') {
-      if (changes.enabled?.newValue === false) {
-        location.reload();
-      }
+    if (area === 'sync' && changes.enabled) {
+      location.reload();
     }
   });
 })();
