@@ -1,7 +1,7 @@
 {
-  "manifest_version": 3,
+  "manifest_version": 4,
   "name": "Ads Art",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Replaces ad slots with art from public museums.",
   "permissions": [
     "storage"

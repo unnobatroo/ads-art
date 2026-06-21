@@ -36,19 +36,27 @@ const AD_SELECTORS = [
   '[class*="taboola"]', '[id*="taboola"]',
   '[class*="outbrain"]', '[id*="outbrain"]',
 
-  // First-party ad containers
-  '[class*="ad-container"]', '[id*="ad-container"]',
-  '[class*="ad-wrapper"]', '[id*="ad-wrapper"]',
-  '[class*="ad-banner"]', '[id*="ad-banner"]',
-  '[class*="ad-slot"]',
-  '[class*="ad-unit"]',
-  '[class*="advertisement"]',
-
-  // Custom ad elements
+  // Custom ad elements (exact tag names → safe)
   'ad-slot', 'amp-ad', 'gpt-ad',
 ];
 
 const SELECTOR_QUERY = AD_SELECTORS.join(',');
+
+// First-party ad containers (e.g. "ad-container", "ads_wrapper", "sidebar-ad-slot").
+// These are matched as whole tokens rather than blind substrings: a CSS rule like
+// [id*="ad-container"] also matches site chrome such as YouTube's
+// "masthead-container" ("masthe·ad-container") or a forum's "thread-wrapper".
+// The leading boundary (start of token, or a -, _, space separator) guarantees we
+// only catch a real "ad"/"ads" word, never the tail of an unrelated word.
+const AD_CONTAINER_RE =
+  /(?:^|[-_ ])ads?[-_ ](?:container|wrapper|banner|slot|unit|box|area|placeholder)/i;
+const ADVERTISEMENT_RE = /(?:^|[-_ ])advert(?:ising|isement)?(?:[-_ ]|$)/i;
+
+// Does an element's class/id name it as a first-party ad container?
+function matchesAdName(el) {
+  const names = `${el.className || ''} ${el.id || ''}`;
+  return AD_CONTAINER_RE.test(names) || ADVERTISEMENT_RE.test(names);
+}
 
 // Containers we must never touch, even if a descendant class coincidentally
 // matches an ad selector.
@@ -126,14 +134,22 @@ function detectAds(container = document) {
     // invalid selector list — should not happen, but never throw
   }
 
-  // 2. Size + hint heuristic (catches unlabelled slots).
+  // 2. First-party ad containers, matched by token-bounded name (no false
+  // positives on site chrome like "masthead-container").
+  const considerByName = (el) => {
+    if (!found.has(el) && matchesAdName(el)) add(el);
+  };
+  if (isElement) considerByName(container);
+  container.querySelectorAll('[class],[id]').forEach(considerByName);
+
+  // 3. Size + hint heuristic (catches unlabelled slots).
   const considerBySize = (el) => {
     if (!found.has(el) && looksLikeAdBySize(el)) add(el);
   };
   if (isElement) considerBySize(container);
   container.querySelectorAll('iframe, div').forEach(considerBySize);
 
-  // 3. Drop anything nested inside another match or an existing replacement.
+  // 4. Drop anything nested inside another match or an existing replacement.
   return [...found].filter((el) => {
     let parent = el.parentElement;
     while (parent) {
