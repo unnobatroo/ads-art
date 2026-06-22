@@ -1,9 +1,6 @@
-/**
- * PAGE OBSERVER
- * Watches for newly added DOM elements and detects ads in them.
- */
+// Watches for newly added DOM nodes and detects ads inside them.
 
-const DEBOUNCE_DELAY = 200; // ms to wait after mutations before processing
+const DEBOUNCE_DELAY = 200; // ms after mutations settle before processing
 const MAX_OBSERVER_ERRORS = 3;
 
 window.__artReplacer = window.__artReplacer || {};

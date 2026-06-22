@@ -1,12 +1,7 @@
-/**
- * AD DETECTOR
- * Finds ad slots on a page using a curated selector list plus a size heuristic.
- * Site chrome (nav bars, headers, search) is explicitly protected, so it is
- * never mistaken for an ad.
- */
+// Finds ad slots via a curated selector list plus a size heuristic, while
+// protecting site chrome (nav, header, search) from being mistaken for an ad.
 
-// Precise, ad-tech-specific selectors. Hyphenated `ad-*` matches are safe from
-// ordinary words; bare substrings like "ad" are deliberately avoided.
+// Precise, ad-tech-specific selectors — no bare "ad" substrings.
 const AD_SELECTORS = [
   // Google / GPT slots
   'ins.adsbygoogle',
@@ -42,12 +37,9 @@ const AD_SELECTORS = [
 
 const SELECTOR_QUERY = AD_SELECTORS.join(',');
 
-// First-party ad containers (e.g. "ad-container", "ads_wrapper", "sidebar-ad-slot").
-// These are matched as whole tokens rather than blind substrings: a CSS rule like
-// [id*="ad-container"] also matches site chrome such as YouTube's
-// "masthead-container" ("masthe·ad-container") or a forum's "thread-wrapper".
-// The leading boundary (start of token, or a -, _, space separator) guarantees we
-// only catch a real "ad"/"ads" word, never the tail of an unrelated word.
+// First-party ad containers ("ad-container", "ads_wrapper", ...). The leading
+// token boundary keeps us from matching the tail of an unrelated word, e.g.
+// "masthead-container" or "thread-wrapper".
 const AD_CONTAINER_RE =
   /(?:^|[-_ ])ads?[-_ ](?:container|wrapper|banner|slot|unit|box|area|placeholder)/i;
 const ADVERTISEMENT_RE = /(?:^|[-_ ])advert(?:ising|isement)?(?:[-_ ]|$)/i;
@@ -104,8 +96,8 @@ function hasAdHint(el) {
   return AD_HINT.test(meta);
 }
 
-// A standard-sized, media-heavy block that also carries an ad hint is very
-// likely an unlabelled ad slot.
+// A standard-sized, media-heavy block with an ad hint is likely an
+// unlabelled ad slot.
 function looksLikeAdBySize(el) {
   if (el.tagName !== 'IFRAME' && el.tagName !== 'DIV') return false;
   if (!matchesAdSize(el.offsetWidth, el.offsetHeight)) return false;
@@ -115,9 +107,7 @@ function looksLikeAdBySize(el) {
   return textLength < 20 && !!el.querySelector('img, iframe');
 }
 
-/**
- * Find all replaceable ad slots within a container.
- */
+// Find all replaceable ad slots within a container.
 function detectAds(container = document) {
   const found = new Set();
   const isElement = container.nodeType === Node.ELEMENT_NODE;

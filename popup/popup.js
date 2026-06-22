@@ -1,21 +1,18 @@
-/**
- * POPUP SCRIPT
- * A single on/off toggle for Ads Art, backed by synced storage.
- */
+// On/off toggle for Ads Art, backed by synced storage.
 
 const enabledToggle = document.getElementById('enabled');
 const powerToggleEl = document.querySelector('.power-toggle');
 
 let syncing = false;
 
-/** Reflect the current enabled + syncing state in the UI. */
+// Reflect the current enabled + syncing state in the UI.
 function render(isEnabled) {
   powerToggleEl.dataset.state = isEnabled ? 'on' : 'off';
   powerToggleEl.querySelector('.power-toggle-ui').textContent = isEnabled ? 'on' : 'off';
   enabledToggle.disabled = powerToggleEl.disabled = syncing;
 }
 
-/** Persist a setting, keeping the UI in its disabled "syncing" state meanwhile. */
+// Persist the setting, disabling the UI while the write is in flight.
 function saveEnabled(value) {
   syncing = true;
   render(value);

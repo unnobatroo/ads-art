@@ -1,9 +1,5 @@
-/**
- * SERVICE WORKER
- * Fetches artwork from public museum APIs, caches it by aspect ratio, and
- * serves a best-fit piece to the content script on request.
- * Sources: Art Institute of Chicago, The Metropolitan Museum of Art.
- */
+// Fetches artwork from museum APIs (AIC, the Met), caches it by aspect ratio,
+// and serves a best-fit piece to the content script on request.
 
 // ===== Configuration =====
 
@@ -25,7 +21,7 @@ let lastSource = '';           // alternate sources for variety
 
 // ===== Helpers =====
 
-/** Bucket an aspect ratio into one of three cache lanes. */
+// Sort an aspect ratio into one of three cache lanes.
 function classifyAspect(width, height) {
   if (!width || !height) return 'square';
   const ratio = width / height;
@@ -34,7 +30,7 @@ function classifyAspect(width, height) {
   return 'square';
 }
 
-/** Record an artwork as shown, keeping the set bounded. */
+// Mark an artwork shown, evicting the oldest once the set is full.
 function markArtworkShown(id) {
   if (!id || shownIds.has(id)) return;
   shownIds.add(id);
@@ -44,7 +40,7 @@ function markArtworkShown(id) {
   }
 }
 
-/** Lower score = better fit. Prioritises aspect ratio, then comparable size. */
+// Lower score = better fit. Aspect ratio dominates; size is a tiebreaker.
 function scoreArtwork(art, targetRatio, targetWidth, targetHeight) {
   if (!art.width || !art.height) return 999;
 
@@ -62,7 +58,7 @@ function scoreArtwork(art, targetRatio, targetWidth, targetHeight) {
   return score;
 }
 
-/** Pick the best-fitting artwork from a list of candidates. */
+// Pick the best-fitting candidate (or a random one if none have dimensions).
 function pickBestArtwork(artworks, targetRatio, targetWidth, targetHeight) {
   const withDims = artworks.filter(a => a.width && a.height);
   if (withDims.length === 0) {
@@ -73,7 +69,7 @@ function pickBestArtwork(artworks, targetRatio, targetWidth, targetHeight) {
     .sort((a, b) => a.score - b.score)[0].art;
 }
 
-/** Round-robin merge of several arrays so sources stay mixed. */
+// Round-robin merge so the sources stay interleaved.
 function interleave(arrays) {
   const result = [];
   const maxLen = Math.max(0, ...arrays.map(a => a.length));
@@ -164,7 +160,7 @@ async function fetchMetMuseum(count = 20) {
 
 const cacheKey = (aspect) => `cache:${aspect}`;
 
-/** Store new artworks into their aspect-ratio lanes. */
+// Store new artworks into their aspect-ratio lanes (unknown dims go in all).
 async function storeArtworks(artworks) {
   if (!artworks?.length) return;
 
@@ -175,7 +171,6 @@ async function storeArtworks(artworks) {
     if (art.width && art.height) {
       buckets[classifyAspect(art.width, art.height)].push(entry);
     } else {
-      // Unknown dimensions can fit any lane.
       buckets.landscape.push(entry);
       buckets.portrait.push(entry);
       buckets.square.push(entry);
@@ -192,7 +187,7 @@ async function storeArtworks(artworks) {
   }
 }
 
-/** Fetch from all sources and cache the results (de-duped while in flight). */
+// Fetch from all sources and cache them; concurrent calls share one request.
 function fetchAndCache() {
   if (fetchInFlight) return fetchInFlight;
 
@@ -206,9 +201,9 @@ function fetchAndCache() {
   return fetchInFlight;
 }
 
-/** Take one best-fit, unseen artwork from the cache, preferring `aspect`. */
+// Take one best-fit, unseen artwork from the cache, preferring `aspect`.
 async function takeFromCache(aspect, targetRatio, targetWidth, targetHeight) {
-  // Try the matching lane first, then fall back to the others.
+  // Matching lane first, then the others.
   const lanes = [aspect, ...['landscape', 'portrait', 'square'].filter(a => a !== aspect)];
 
   for (const lane of lanes) {
@@ -260,6 +255,7 @@ async function handleGetArt({ width, height }) {
   const aspect = classifyAspect(width, height);
   const ratio = width / height;
 
+  // Serve from cache; on a miss, fetch once and try again.
   let artwork = await takeFromCache(aspect, ratio, width, height);
   if (!artwork) {
     await fetchAndCache().catch(() => {});
@@ -283,6 +279,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // ===== Lifecycle =====
 
+// Warm the cache on install so the first ad has art ready.
 chrome.runtime.onInstalled.addListener(() => {
   fetchAndCache().catch((error) => {
     console.warn('[Ads Art] Pre-cache error:', error);
