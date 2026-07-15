@@ -104,7 +104,3 @@ There is no automated test suite yet. A practical manual check covers:
 ## Credits
 
 Artwork and metadata come from the open-access programs of the [Art Institute of Chicago](https://www.artic.edu/open-access) and [The Metropolitan Museum of Art](https://www.metmuseum.org/art/collection/search-open-access). The museums retain their respective image and metadata rights.
-
-## License
-
-Ads Art is licensed under the [GNU General Public License version 3](LICENSE).
