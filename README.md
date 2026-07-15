@@ -1,34 +1,8 @@
 # Ads Art
 
-Turn advertising space into a small museum wall.
-
 Ads Art is a browser extension that finds ad slots and fills them with paintings from the Art Institute of Chicago and The Metropolitan Museum of Art. Hover over a painting to see its title, artist, date, and museum.
 
-[Open Ads Art in the Chrome Web Store](https://chromewebstore.google.com/detail/ads-art/hiklgdbacjoodnnipckhmacbecdchhpl)
-
-## Contents
-
-- [What it does](#what-it-does)
-- [How one ad becomes art](#how-one-ad-becomes-art)
-- [System design](#system-design)
-- [Privacy and permissions](#privacy-and-permissions)
-- [Development](#development)
-- [Build a release](#build-a-release)
-- [Repository map](#repository-map)
-
-## What it does
-
-Imagine a page with a 300 × 250 ad box in the sidebar. Ads Art:
-
-1. recognizes the box as an ad slot;
-2. measures the available space;
-3. asks the background worker for a painting with a similar shape;
-4. replaces the ad content while keeping the same footprint;
-5. adds a small caption that appears on hover.
-
-The toolbar popup has one control: on or off. The choice is saved with browser sync storage.
-
-## How one ad becomes art
+## How it works
 
 ### 1. Detect the slot
 
@@ -111,15 +85,6 @@ Requirements:
 - Python 3, used by the release script to read the version;
 - `zip`, used to create browser packages.
 
-### Current manifest issue
-
-The source currently declares `"manifest_version": 4` in both manifests. Chrome's published extension format accepts version `3`, and Firefox documents Manifest V3 as well. The build script can create ZIP files, but browsers will reject the current v1.2 manifests until those two values are changed back to `3`.
-
-- [Chrome manifest format](https://developer.chrome.com/docs/extensions/mv3/manifest/)
-- [Firefox manifest version](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/manifest_version)
-
-After correcting that value, load the repository root as an unpacked extension in Chrome, or package the Firefox variant with the build script below.
-
 ### Useful checks
 
 ```bash
@@ -130,47 +95,11 @@ bash -n build.sh
 
 There is no automated test suite yet. A practical manual check covers:
 
-1. an ad already present when the page opens;
+1. An ad already present when the page opens;
 2. an ad inserted after the page loads;
 3. a page header or navigation bar that must stay untouched;
 4. the artwork caption on hover;
 5. the popup toggle after a page reload.
-
-## Build a release
-
-Run from the repository root:
-
-```bash
-./build.sh
-```
-
-The script reads the version from `manifest.json` and creates:
-
-```text
-ads-art-chrome-v1.2.zip
-ads-art-firefox-v1.2.zip
-```
-
-Each archive contains the chosen browser manifest, extension code, styles, icons, and GPL license. Generated ZIP files are ignored by Git.
-
-## Repository map
-
-```text
-background/
-  service-worker.js     Museum requests, caching, and artwork choice
-
-content/
-  detector.js           Finds likely ad slots and protects site controls
-  observer.js           Watches ads added after page load
-  replacer.js           Requests art and swaps it into the page
-
-popup/                  Toolbar popup and saved on/off switch
-styles/art-overlay.css  Early ad hiding and artwork presentation
-icons/                  Browser toolbar and store icons
-manifest.json           Chromium package definition
-manifest.firefox.json   Firefox package definition
-build.sh                Chrome and Firefox ZIP builder
-```
 
 ## Credits
 
