@@ -77,13 +77,13 @@ body {
   line-height: 1;
 }
 
-.power-toggle:disabled {
+.power-toggle[aria-disabled="true"] {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
 }
 
-.power-toggle:disabled:hover {
+.power-toggle[aria-disabled="true"]:hover {
   transform: none;
 }
 

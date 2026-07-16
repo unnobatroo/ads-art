@@ -1,8 +1,6 @@
 // Fetches artwork from museum APIs (AIC, the Met), caches it by aspect ratio,
 // and serves a best-fit piece to the content script on request.
 
-// ===== Configuration =====
-
 const ARTIC_API = 'https://api.artic.edu/api/v1';
 const MET_API = 'https://collectionapi.metmuseum.org/public/collection/v1';
 const QUERY = 'painting';
@@ -12,17 +10,14 @@ const CACHE_REFILL_THRESHOLD = 10;
 const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SHOWN_IDS = 2000;
 
-// ===== State =====
-
-const shownIds = new Set();   // artwork ids already shown, to avoid repeats
-const shownIdQueue = [];      // FIFO mirror of shownIds for bounded eviction
-let fetchInFlight = null;      // de-dupes concurrent network refills
-let lastSource = '';           // alternate sources for variety
-
-// ===== Helpers =====
+const ASPECTS: ArtworkAspect[] = ['landscape', 'portrait', 'square'];
+const shownIds = new Set<string>();
+const shownIdQueue: string[] = [];
+let fetchInFlight: Promise<Artwork[]> | null = null;
+let lastSource = '';
 
 // Sort an aspect ratio into one of three cache lanes.
-function classifyAspect(width, height) {
+function classifyAspect(width: number, height: number): ArtworkAspect {
   if (!width || !height) return 'square';
   const ratio = width / height;
   if (ratio > 1.3) return 'landscape';
@@ -31,17 +26,23 @@ function classifyAspect(width, height) {
 }
 
 // Mark an artwork shown, evicting the oldest once the set is full.
-function markArtworkShown(id) {
+function markArtworkShown(id: string): void {
   if (!id || shownIds.has(id)) return;
   shownIds.add(id);
   shownIdQueue.push(id);
   while (shownIdQueue.length > MAX_SHOWN_IDS) {
-    shownIds.delete(shownIdQueue.shift());
+    const oldestId = shownIdQueue.shift();
+    if (oldestId) shownIds.delete(oldestId);
   }
 }
 
-// Lower score = better fit. Aspect ratio dominates; size is a tiebreaker.
-function scoreArtwork(art, targetRatio, targetWidth, targetHeight) {
+// Lower score = better fit. Aspect ratio dominates; low resolution is penalized.
+function scoreArtwork(
+  art: Artwork,
+  targetRatio: number,
+  targetWidth: number,
+  targetHeight: number
+): number {
   if (!art.width || !art.height) return 999;
 
   let score = Math.abs(art.width / art.height - targetRatio) * 0.8;
@@ -51,39 +52,78 @@ function scoreArtwork(art, targetRatio, targetWidth, targetHeight) {
     const targetArea = targetWidth * targetHeight;
     if (artArea < targetArea * 0.5) {
       score += Math.min((targetArea * 0.5 - artArea) / (targetArea * 0.5), 1) * 0.2;
-    } else if (artArea > targetArea * 3) {
-      score += Math.min((artArea - targetArea * 3) / (targetArea * 3), 1) * 0.2;
     }
   }
   return score;
 }
 
-// Pick the best-fitting candidate (or a random one if none have dimensions).
-function pickBestArtwork(artworks, targetRatio, targetWidth, targetHeight) {
-  const withDims = artworks.filter(a => a.width && a.height);
-  if (withDims.length === 0) {
-    return artworks[Math.floor(Math.random() * artworks.length)];
-  }
-  return withDims
-    .map(art => ({ art, score: scoreArtwork(art, targetRatio, targetWidth, targetHeight) }))
-    .sort((a, b) => a.score - b.score)[0].art;
-}
+function pickBestArtwork(
+  artworks: Artwork[],
+  targetRatio: number,
+  targetWidth: number,
+  targetHeight: number
+): Artwork | undefined {
+  let best: Artwork | undefined;
+  let bestScore = Number.POSITIVE_INFINITY;
 
-// Round-robin merge so the sources stay interleaved.
-function interleave(arrays) {
-  const result = [];
-  const maxLen = Math.max(0, ...arrays.map(a => a.length));
-  for (let i = 0; i < maxLen; i++) {
-    for (const arr of arrays) {
-      if (i < arr.length) result.push(arr[i]);
+  for (const artwork of artworks) {
+    if (!artwork.width || !artwork.height) continue;
+    const score = scoreArtwork(artwork, targetRatio, targetWidth, targetHeight);
+    if (score < bestScore) {
+      best = artwork;
+      bestScore = score;
     }
   }
+
+  if (best) return best;
+  return artworks[Math.floor(Math.random() * artworks.length)];
+}
+
+function sample<T>(items: T[], count: number): T[] {
+  const size = Math.min(count, items.length);
+  const result = items.slice(0, size);
+
+  for (let index = size; index < items.length; index++) {
+    const replacementIndex = Math.floor(Math.random() * (index + 1));
+    const item = items[index];
+    if (replacementIndex < size && item !== undefined) {
+      result[replacementIndex] = item;
+    }
+  }
+
   return result;
 }
 
-// ===== API fetchers =====
+interface ArtICSearchItem {
+  id: number;
+  title?: string;
+  artist_display?: string;
+  date_display?: string;
+  image_id?: string;
+  thumbnail?: {
+    width?: number;
+    height?: number;
+  };
+}
 
-async function fetchArtIC() {
+interface ArtICSearchResponse {
+  data?: ArtICSearchItem[];
+}
+
+interface MetSearchResponse {
+  objectIDs?: number[];
+}
+
+interface MetObject {
+  objectID: number;
+  title?: string;
+  artistDisplayName?: string;
+  objectDate?: string;
+  primaryImage?: string;
+  primaryImageSmall?: string;
+}
+
+async function fetchArtIC(): Promise<Artwork[]> {
   try {
     const url = new URL(`${ARTIC_API}/artworks/search`);
     url.searchParams.set('q', QUERY);
@@ -94,9 +134,9 @@ async function fetchArtIC() {
     const res = await fetch(url);
     if (!res.ok) return [];
 
-    const { data = [] } = await res.json();
+    const { data = [] } = await res.json() as ArtICSearchResponse;
     return data
-      .filter(item => item.image_id)
+      .filter((item): item is ArtICSearchItem & { image_id: string } => Boolean(item.image_id))
       .map(item => ({
         id: `artic:${item.id}`,
         title: item.title || 'Untitled',
@@ -115,7 +155,7 @@ async function fetchArtIC() {
   }
 }
 
-async function fetchMetMuseum(count = 20) {
+async function fetchMetMuseum(count = 20): Promise<Artwork[]> {
   try {
     const searchUrl = new URL(`${MET_API}/search`);
     searchUrl.searchParams.set('hasImages', 'true');
@@ -124,20 +164,22 @@ async function fetchMetMuseum(count = 20) {
     const searchRes = await fetch(searchUrl);
     if (!searchRes.ok) return [];
 
-    const { objectIDs = [] } = await searchRes.json();
+    const { objectIDs = [] } = await searchRes.json() as MetSearchResponse;
     if (objectIDs.length === 0) return [];
 
-    const selected = [...objectIDs].sort(() => Math.random() - 0.5).slice(0, count);
+    const selected = sample(objectIDs, count);
     const objects = await Promise.all(
       selected.map(id =>
         fetch(`${MET_API}/objects/${id}`)
-          .then(r => r.ok ? r.json() : null)
+          .then(async (response): Promise<MetObject | null> =>
+            response.ok ? await response.json() as MetObject : null
+          )
           .catch(() => null)
       )
     );
 
     return objects
-      .filter(obj => obj && (obj.primaryImage || obj.primaryImageSmall))
+      .filter((obj): obj is MetObject => Boolean(obj && (obj.primaryImage || obj.primaryImageSmall)))
       .map(obj => ({
         id: `met:${obj.objectID}`,
         title: obj.title || 'Untitled',
@@ -145,8 +187,8 @@ async function fetchMetMuseum(count = 20) {
         date: obj.objectDate || '',
         source: 'The Metropolitan Museum of Art',
         imageId: null,
-        imageUrl: obj.primaryImage,
-        smallImageUrl: obj.primaryImageSmall,
+        imageUrl: obj.primaryImage ?? null,
+        smallImageUrl: obj.primaryImageSmall ?? null,
         width: 0,
         height: 0,
       }));
@@ -156,15 +198,23 @@ async function fetchMetMuseum(count = 20) {
   }
 }
 
-// ===== Cache =====
+const cacheKey = (aspect: ArtworkAspect): string => `cache:${aspect}`;
 
-const cacheKey = (aspect) => `cache:${aspect}`;
+async function getCachedArtworks(key: string): Promise<CachedArtwork[]> {
+  const stored = await chrome.storage.local.get(key);
+  const value: unknown = stored[key];
+  return Array.isArray(value) ? value as CachedArtwork[] : [];
+}
 
 // Store new artworks into their aspect-ratio lanes (unknown dims go in all).
-async function storeArtworks(artworks) {
-  if (!artworks?.length) return;
+async function storeArtworks(artworks: Artwork[]): Promise<void> {
+  if (artworks.length === 0) return;
 
-  const buckets = { landscape: [], portrait: [], square: [] };
+  const buckets: Record<ArtworkAspect, CachedArtwork[]> = {
+    landscape: [],
+    portrait: [],
+    square: [],
+  };
   for (const art of artworks) {
     if (shownIds.has(art.id)) continue;
     const entry = { ...art, cachedAt: Date.now() };
@@ -177,10 +227,10 @@ async function storeArtworks(artworks) {
     }
   }
 
-  for (const [aspect, entries] of Object.entries(buckets)) {
+  for (const [aspect, entries] of Object.entries(buckets) as [ArtworkAspect, CachedArtwork[]][]) {
     if (entries.length === 0) continue;
     const key = cacheKey(aspect);
-    const existing = (await chrome.storage.local.get(key))[key] || [];
+    const existing = await getCachedArtworks(key);
     const seen = new Set(existing.map(e => e.id));
     const merged = [...existing, ...entries.filter(e => !seen.has(e.id))];
     await chrome.storage.local.set({ [key]: merged.slice(-CACHE_MAX_ITEMS) });
@@ -188,12 +238,12 @@ async function storeArtworks(artworks) {
 }
 
 // Fetch from all sources and cache them; concurrent calls share one request.
-function fetchAndCache() {
+function fetchAndCache(): Promise<Artwork[]> {
   if (fetchInFlight) return fetchInFlight;
 
   fetchInFlight = (async () => {
-    const results = await Promise.all([fetchArtIC(), fetchMetMuseum()]);
-    const artworks = interleave(results);
+    const [artic, met] = await Promise.all([fetchArtIC(), fetchMetMuseum()]);
+    const artworks = [...artic, ...met];
     if (artworks.length > 0) await storeArtworks(artworks);
     return artworks;
   })().finally(() => { fetchInFlight = null; });
@@ -202,14 +252,19 @@ function fetchAndCache() {
 }
 
 // Take one best-fit, unseen artwork from the cache, preferring `aspect`.
-async function takeFromCache(aspect, targetRatio, targetWidth, targetHeight) {
+async function takeFromCache(
+  aspect: ArtworkAspect,
+  targetRatio: number,
+  targetWidth: number,
+  targetHeight: number
+): Promise<Artwork | null> {
   // Matching lane first, then the others.
-  const lanes = [aspect, ...['landscape', 'portrait', 'square'].filter(a => a !== aspect)];
+  const lanes = [aspect, ...ASPECTS.filter(lane => lane !== aspect)];
 
   for (const lane of lanes) {
     const key = cacheKey(lane);
-    const items = (await chrome.storage.local.get(key))[key];
-    if (!items?.length) continue;
+    const items = await getCachedArtworks(key);
+    if (items.length === 0) continue;
 
     const now = Date.now();
     const valid = items.filter(item =>
@@ -237,7 +292,9 @@ async function takeFromCache(aspect, targetRatio, targetWidth, targetHeight) {
     await chrome.storage.local.set({ [key]: remaining });
 
     if (remaining.length < CACHE_REFILL_THRESHOLD) {
-      fetchAndCache().catch(() => {});
+      fetchAndCache().catch((error) => {
+        console.warn('[Ads Art] Cache refill failed:', error);
+      });
     }
     return artwork;
   }
@@ -245,9 +302,7 @@ async function takeFromCache(aspect, targetRatio, targetWidth, targetHeight) {
   return null;
 }
 
-// ===== Message handling =====
-
-async function handleGetArt({ width, height }) {
+async function handleGetArt({ width, height }: GetArtMessage): Promise<GetArtResponse> {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return { artwork: null };
   }
@@ -258,14 +313,22 @@ async function handleGetArt({ width, height }) {
   // Serve from cache; on a miss, fetch once and try again.
   let artwork = await takeFromCache(aspect, ratio, width, height);
   if (!artwork) {
-    await fetchAndCache().catch(() => {});
+    await fetchAndCache();
     artwork = await takeFromCache(aspect, ratio, width, height);
   }
   return { artwork: artwork || null };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'GET_ART') return false;
+function isGetArtMessage(message: unknown): message is GetArtMessage {
+  if (!message || typeof message !== 'object') return false;
+  const candidate = message as Partial<GetArtMessage>;
+  return candidate.type === 'GET_ART'
+    && typeof candidate.width === 'number'
+    && typeof candidate.height === 'number';
+}
+
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  if (!isGetArtMessage(message)) return false;
 
   handleGetArt(message)
     .then(sendResponse)
@@ -276,8 +339,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true; // response is async
 });
-
-// ===== Lifecycle =====
 
 // Warm the cache on install so the first ad has art ready.
 chrome.runtime.onInstalled.addListener(() => {

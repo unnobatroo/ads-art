@@ -2,6 +2,8 @@
 .claude/
 .codex-vault/
 node_modules/
+.build/
+dist/
 *.zip
 
 # Dead code / unused directories — not loaded by manifest
