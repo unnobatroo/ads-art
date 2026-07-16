@@ -1,6 +1,6 @@
 # Ads Art
 
-Ads Art is a browser extension that finds ad slots and fills them with paintings from the Art Institute of Chicago and The Metropolitan Museum of Art. Hover over a painting to see its title, artist, date, and museum.
+Ads Art is a browser extension that finds ad slots and fills them with paintings. Hover over to see its title, artist, date, and museum.
 
 ## How it works
 
