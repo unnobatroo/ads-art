@@ -32,7 +32,7 @@ function backgroundGlobals() {
 
 test('artwork selection prefers the closest aspect ratio', async () => {
   const evaluate = await loadScript(
-    '.build/background/service-worker.js',
+    'dist/.compiled/background/service-worker.js',
     backgroundGlobals(),
   );
 
@@ -52,7 +52,7 @@ test('artwork selection prefers the closest aspect ratio', async () => {
 
 test('large source images are not penalized for extra resolution', async () => {
   const evaluate = await loadScript(
-    '.build/background/service-worker.js',
+    'dist/.compiled/background/service-worker.js',
     backgroundGlobals(),
   );
 
@@ -66,7 +66,7 @@ test('large source images are not penalized for extra resolution', async () => {
 test('ad naming avoids common false positives', async () => {
   class HTMLElement {}
 
-  const evaluate = await loadScript('.build/content/detector.js', {
+  const evaluate = await loadScript('dist/.compiled/content/detector.js', {
     document: {},
     HTMLElement,
     window: {},
@@ -87,11 +87,14 @@ test('ad naming avoids common false positives', async () => {
 test('browser manifests use supported Manifest V3', async () => {
   const chromeManifest = JSON.parse(await readFile('manifest.json', 'utf8'));
   const firefoxManifest = JSON.parse(await readFile('manifest.firefox.json', 'utf8'));
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
 
   assert.equal(chromeManifest.manifest_version, 3);
   assert.equal(firefoxManifest.manifest_version, 3);
   assert.equal(chromeManifest.content_scripts.length, 1);
   assert.equal(firefoxManifest.content_scripts.length, 1);
+  assert.equal(chromeManifest.version, firefoxManifest.version);
+  assert.equal(normalizeVersion(packageJson.version), normalizeVersion(chromeManifest.version));
 });
 
 test('overlay CSS does not hide ads before a replacement is ready', async () => {
@@ -100,3 +103,7 @@ test('overlay CSS does not hide ads before a replacement is ready', async () => 
   assert.match(css, /\[data-art-replacer="replacing"\]/);
   assert.doesNotMatch(css, /ins\.adsbygoogle|doubleclick\.net|\[data-ad-slot\]/);
 });
+
+function normalizeVersion(version) {
+  return version.split('.').map(Number).concat(0, 0, 0).slice(0, 3).join('.');
+}

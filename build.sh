@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Compile the TypeScript sources and build Chrome and Firefox packages.
-# Run from the repo root. Outputs unpacked folders in dist/ plus release ZIPs.
+# Run from the repo root. All generated files are written to dist/.
 
 set -euo pipefail
 
@@ -8,8 +8,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
 VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
-COMPILED_ROOT="$ROOT/.build"
 DIST_ROOT="$ROOT/dist"
+COMPILED_ROOT="$DIST_ROOT/.compiled"
 
 rm -rf "$COMPILED_ROOT"
 npm run compile
@@ -17,7 +17,7 @@ npm run compile
 build() {
   local target="$1"      # chrome | firefox
   local manifest="$2"    # path to manifest file to use
-  local out="ads-art-${target}-v${VERSION}.zip"
+  local out="$DIST_ROOT/ads-art-${target}-v${VERSION}.zip"
   local stage="$DIST_ROOT/$target"
 
   rm -rf "$stage"
@@ -33,8 +33,8 @@ build() {
   cp "$COMPILED_ROOT/popup/popup.js" "$stage/popup/"
   find "$stage" -name .DS_Store -delete
 
-  (cd "$stage" && zip -qr "$ROOT/$out" .)
-  echo "built dist/$target and $out ($(du -h "$out" | cut -f1))"
+  (cd "$stage" && zip -qr "$out" .)
+  echo "built dist/$target and dist/$(basename "$out") ($(du -h "$out" | cut -f1))"
 }
 
 build chrome manifest.json

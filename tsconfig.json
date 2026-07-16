@@ -7,7 +7,7 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "rootDir": ".",
-    "outDir": ".build",
+    "outDir": "dist/.compiled",
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
