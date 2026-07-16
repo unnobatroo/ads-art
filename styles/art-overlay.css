@@ -1,51 +1,12 @@
-/**
- * Ads Art — overlay styles
- *
- * 1. Hide well-known ad slots immediately, before the replacer runs, so the
- *    page never flashes a real ad. Only precise, ad-tech-specific selectors are
- *    used here — never broad word matches — so site chrome (nav bars, headers,
- *    search boxes) is never affected.
- * 2. Style the artwork that replaces each ad.
- */
-
-/* ===== Hide known ad slots until art is placed inside them ===== */
-ins.adsbygoogle,
-iframe[src*="doubleclick.net"],
-iframe[src*="googlesyndication.com"],
-iframe[src*="googleadservices.com"],
-iframe[src*="amazon-adsystem.com"],
-iframe[src*="adnxs.com"],
-iframe[src*="criteo.com"],
-iframe[src*="moatads.com"],
-iframe[src*="rubiconproject.com"],
-iframe[src*="pubmatic.com"],
-iframe[src*="openx.net"],
-iframe[src*="casalemedia.com"],
-[id^="google_ads"],
-[id^="div-gpt-ad"],
-[id^="div-gpt-"],
-[id^="gpt-ad"],
-[data-ad-slot],
-[data-ad-client],
-[data-ad-format],
-[data-ad-unit-path],
-[data-google-query-id],
-[class*="taboola"],
-[id*="taboola"],
-[class*="outbrain"],
-[id*="outbrain"],
-ad-slot,
-amp-ad,
-gpt-ad {
+/* Disabled and failed slots stay visible. */
+[data-art-replacer="replacing"] {
   visibility: hidden !important;
 }
 
-/* Reveal a slot again once we have replaced it with artwork. */
 [data-art-replacer="replaced"] {
   visibility: visible !important;
 }
 
-/* ===== Artwork that replaces an ad ===== */
 .art-replacer-container {
   position: relative;
   overflow: hidden;
@@ -53,12 +14,17 @@ gpt-ad {
   border: 1px solid rgba(255, 255, 255, 0.16);
   box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.38);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
-  cursor: pointer;
 }
 
-.art-replacer-container:hover {
+.art-replacer-container:hover,
+.art-replacer-container:focus {
   transform: translate(-1px, -1px);
   box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.42);
+}
+
+.art-replacer-container:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
 }
 
 .art-replacer-image {
@@ -87,7 +53,8 @@ gpt-ad {
   pointer-events: none;
 }
 
-.art-replacer-container:hover .art-replacer-tooltip {
+.art-replacer-container:hover .art-replacer-tooltip,
+.art-replacer-container:focus .art-replacer-tooltip {
   opacity: 1;
 }
 

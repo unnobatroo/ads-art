@@ -2,31 +2,16 @@
 
 (async function () {
   const AR = window.__artReplacer;
-  if (!AR) return;
+  if (!AR?.detectAds) return;
 
   const settings = await chrome.storage.sync.get({ enabled: true });
-  if (!settings.enabled) return;
+  if (settings.enabled === false) return;
 
   const MIN_DIMENSION = 50;
   const RATIO_TOLERANCE = 0.2;
-  const DEBUG = false;
-  let replaceQueue = Promise.resolve();
+  const IMAGE_LOAD_TIMEOUT = 8000;
 
-  // Open connections to the image hosts now so the first download skips
-  // DNS + TLS setup.
-  (function preconnectImageHosts() {
-    const head = document.head || document.documentElement;
-    if (!head) return;
-    for (const host of ['https://www.artic.edu', 'https://images.metmuseum.org']) {
-      const link = document.createElement('link');
-      link.rel = 'preconnect';
-      link.href = host;
-      link.crossOrigin = 'anonymous';
-      head.appendChild(link);
-    }
-  })();
-
-  function getDevicePixelRatio() {
+  function getDevicePixelRatio(): number {
     return Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
   }
 
@@ -34,15 +19,19 @@
   // instead of generating a fresh resize for every odd per-slot width.
   const IIIF_WIDTH_BUCKETS = [200, 400, 600, 843, 1200, 1686];
 
-  function bucketWidth(width) {
+  function bucketWidth(width: number): number {
     for (const bucket of IIIF_WIDTH_BUCKETS) {
       if (width <= bucket) return bucket;
     }
-    return IIIF_WIDTH_BUCKETS[IIIF_WIDTH_BUCKETS.length - 1];
+    return IIIF_WIDTH_BUCKETS[IIIF_WIDTH_BUCKETS.length - 1] ?? 1686;
   }
 
   // Build the image URL for an artwork, cropping AIC pieces to the slot ratio.
-  function buildArtImageUrl(artwork, slotWidth, slotHeight) {
+  function buildArtImageUrl(
+    artwork: Artwork,
+    slotWidth: number,
+    slotHeight: number
+  ): string {
     // The Met (no imageId) gives a small web image and a multi-MB original;
     // use the small one unless the slot is too large for it.
     if (!artwork.imageId) {
@@ -69,7 +58,10 @@
     }
 
     // Center-crop to the slot ratio: trim the longer axis, keep the shorter.
-    let cropWidth, cropHeight, cropX, cropY;
+    let cropWidth: number;
+    let cropHeight: number;
+    let cropX: number;
+    let cropY: number;
     if (slotRatio > artRatio) {
       cropWidth = artwork.width;
       cropHeight = Math.round(artwork.width / slotRatio);
@@ -86,33 +78,55 @@
   }
 
   // 'cover' for extreme ratios (would letterbox badly), 'contain' otherwise.
-  function getObjectFit(slotWidth, slotHeight) {
+  function getObjectFit(slotWidth: number, slotHeight: number): 'cover' | 'contain' {
     const ratio = slotWidth / slotHeight;
     return (ratio > 3 || ratio < 0.33) ? 'cover' : 'contain';
   }
 
-  function makeLine(className, text) {
+  function makeLine(className: string, text: string): HTMLDivElement {
     const el = document.createElement('div');
     el.className = className;
     el.textContent = text;
     return el;
   }
 
-  // Built with DOM APIs (never HTML strings) so untrusted artwork metadata
-  // can't be interpreted as markup.
-  function createArtContainer(artwork, slotWidth, slotHeight) {
+  function loadImage(img: HTMLImageElement, src: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (loaded: boolean): void => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve(loaded);
+      };
+      const timeout = window.setTimeout(() => finish(false), IMAGE_LOAD_TIMEOUT);
+
+      img.addEventListener('load', () => finish(img.naturalWidth > 0), { once: true });
+      img.addEventListener('error', () => finish(false), { once: true });
+      img.src = src;
+    });
+  }
+
+  async function createArtContainer(
+    artwork: Artwork,
+    slotWidth: number,
+    slotHeight: number
+  ): Promise<HTMLDivElement | null> {
+    const imageUrl = buildArtImageUrl(artwork, slotWidth, slotHeight);
+    if (!imageUrl) return null;
+
     const container = document.createElement('div');
     container.className = 'art-replacer-container';
+    container.tabIndex = 0;
     container.style.cssText = `width:${slotWidth}px;height:${slotHeight}px;position:relative;overflow:hidden;`;
 
     const img = document.createElement('img');
     img.decoding = 'async';
     img.loading = 'eager';
-    img.fetchPriority = 'high';
-    img.src = buildArtImageUrl(artwork, slotWidth, slotHeight);
     img.alt = `${artwork.title} by ${artwork.artist}`;
     img.className = 'art-replacer-image';
     img.style.cssText = `width:100%;height:100%;object-fit:${getObjectFit(slotWidth, slotHeight)};`;
+    if (!await loadImage(img, imageUrl)) return null;
     container.appendChild(img);
 
     const tooltip = document.createElement('div');
@@ -126,27 +140,35 @@
     return container;
   }
 
-  async function replaceAd(adElement) {
-    if (adElement.dataset.artReplacer === 'replaced' || adElement.dataset.artReplacer === 'replacing') {
-      return;
-    }
+  async function replaceAd(adElement: HTMLElement): Promise<void> {
+    if (adElement.dataset.artReplacer) return;
 
     const rect = adElement.getBoundingClientRect();
     const width = Math.round(rect.width || adElement.offsetWidth || 0);
     const height = Math.round(rect.height || adElement.offsetHeight || 0);
-    if (width < MIN_DIMENSION || height < MIN_DIMENSION) return;
+    if (width < MIN_DIMENSION || height < MIN_DIMENSION) {
+      adElement.dataset.artReplacer = 'skipped';
+      return;
+    }
 
-    adElement.dataset.artReplacer = 'replacing';
+    adElement.dataset.artReplacer = 'loading';
 
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'GET_ART', width, height });
+      const message: GetArtMessage = { type: 'GET_ART', width, height };
+      const response = await chrome.runtime.sendMessage<GetArtMessage, GetArtResponse>(message);
       if (!response?.artwork) {
         adElement.dataset.artReplacer = 'failed';
         return;
       }
 
       const artwork = response.artwork;
-      const artContainer = createArtContainer(artwork, width, height);
+      const artContainer = await createArtContainer(artwork, width, height);
+      if (!artContainer) {
+        adElement.dataset.artReplacer = 'failed';
+        return;
+      }
+
+      adElement.dataset.artReplacer = 'replacing';
 
       // An iframe can't hold our markup, so swap it out in the parent.
       if (adElement.tagName === 'IFRAME') {
@@ -160,46 +182,32 @@
         }
       } else {
         adElement.replaceChildren(artContainer);
+        adElement.dataset.artReplacer = 'replaced';
       }
 
       artContainer.dataset.artReplacer = 'replaced';
 
     } catch (error) {
-      if (DEBUG) console.warn('[Art Replacer] Failed to replace ad:', error);
+      console.warn('[Ads Art] Failed to replace ad:', error);
       adElement.dataset.artReplacer = 'failed';
     }
   }
 
-  async function replaceAds(adElements) {
-    for (const ad of adElements) {
-      await replaceAd(ad);
-    }
-  }
-
-  // Serialize replacements through one chain so they never overlap.
-  function enqueueReplacement(adElements) {
-    replaceQueue = replaceQueue
-      .then(() => replaceAds(adElements))
-      .catch((error) => {
-        if (DEBUG) console.warn('[Art Replacer] Queue error:', error);
-      });
-
-    return replaceQueue;
+  async function replaceAds(adElements: HTMLElement[]): Promise<void> {
+    await Promise.all(adElements.map(replaceAd));
   }
 
   // Existing ads on load.
   const initialAds = AR.detectAds(document);
   if (initialAds.length > 0) {
-    if (DEBUG) console.log(`[Art Replacer] Found ${initialAds.length} ads on load`);
-    await enqueueReplacement(initialAds);
+    await replaceAds(initialAds);
   }
 
   // Ads injected later.
   if (AR.startObserver) {
     AR.startObserver(async (newAds) => {
       if (newAds.length > 0) {
-        if (DEBUG) console.log(`[Art Replacer] Found ${newAds.length} new ads`);
-        await enqueueReplacement(newAds);
+        await replaceAds(newAds);
       }
     });
   }

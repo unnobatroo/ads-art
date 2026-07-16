@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "none",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "rootDir": ".",
+    "outDir": "dist/.compiled",
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "background/**/*.ts",
+    "content/**/*.ts",
+    "popup/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}
