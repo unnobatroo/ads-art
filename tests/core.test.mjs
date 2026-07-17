@@ -16,12 +16,12 @@ function backgroundGlobals() {
       storage: {
         local: {
           get: async () => ({}),
-          set: async () => {},
+          set: async () => { },
         },
       },
       runtime: {
-        onMessage: { addListener() {} },
-        onInstalled: { addListener() {} },
+        onMessage: { addListener() { } },
+        onInstalled: { addListener() { } },
       },
     },
     fetch: async () => {
@@ -64,7 +64,7 @@ test('large source images are not penalized for extra resolution', async () => {
 });
 
 test('ad naming avoids common false positives', async () => {
-  class HTMLElement {}
+  class HTMLElement { }
 
   const evaluate = await loadScript('dist/.compiled/content/detector.js', {
     document: {},
@@ -82,6 +82,48 @@ test('ad naming avoids common false positives', async () => {
   );
   assert.equal(evaluate('matchesAdSize(300, 250)'), true);
   assert.equal(evaluate('matchesAdSize(500, 500)'), false);
+});
+
+test('AutoScout custom ad slots are recognized directly', async () => {
+  class HTMLElement {
+    constructor() {
+      this.dataset = {};
+      this.id = '';
+      this.parentElement = null;
+      this.tagName = 'S24-AD-SLOT';
+    }
+
+    getAttribute(name) {
+      if (name === 'ad-unit-path') return '/21906995161/as24_at/Listpage/Contentbanner_1';
+      return null;
+    }
+
+    matches(selectors) {
+      return selectors.split(',').some(selector =>
+        selector === 's24-ad-slot' || selector === '[ad-unit-path]'
+      );
+    }
+
+    closest() {
+      return null;
+    }
+
+    querySelector() {
+      return null;
+    }
+
+    querySelectorAll() {
+      return [];
+    }
+  }
+
+  const evaluate = await loadScript('dist/.compiled/content/detector.js', {
+    document: {},
+    HTMLElement,
+    window: {},
+  });
+
+  assert.equal(evaluate('detectAds(new HTMLElement()).length'), 1);
 });
 
 test('browser manifests use supported Manifest V3', async () => {

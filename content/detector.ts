@@ -9,6 +9,7 @@ const AD_SELECTORS = [
   '[data-ad-client]',
   '[data-ad-format]',
   '[data-ad-unit-path]',
+  '[ad-unit-path]',
   '[data-google-query-id]',
   'iframe[src*="doubleclick.net"]',
   'iframe[src*="googlesyndication.com"]',
@@ -26,6 +27,7 @@ const AD_SELECTORS = [
   '[class*="outbrain"]',
   '[id*="outbrain"]',
   'ad-slot',
+  's24-ad-slot',
   'amp-ad',
   'gpt-ad',
 ];

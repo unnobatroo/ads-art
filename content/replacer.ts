@@ -10,6 +10,8 @@
   const MIN_DIMENSION = 50;
   const RATIO_TOLERANCE = 0.2;
   const IMAGE_LOAD_TIMEOUT = 8000;
+  const SIZE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 8000];
+  const sizeRetryCounts = new WeakMap<HTMLElement, number>();
 
   function getDevicePixelRatio(): number {
     return Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
@@ -147,10 +149,25 @@
     const width = Math.round(rect.width || adElement.offsetWidth || 0);
     const height = Math.round(rect.height || adElement.offsetHeight || 0);
     if (width < MIN_DIMENSION || height < MIN_DIMENSION) {
-      adElement.dataset.artReplacer = 'skipped';
+      const retryCount = sizeRetryCounts.get(adElement) ?? 0;
+      const retryDelay = SIZE_RETRY_DELAYS_MS[retryCount];
+      if (retryDelay === undefined) {
+        adElement.dataset.artReplacer = 'skipped';
+        sizeRetryCounts.delete(adElement);
+        return;
+      }
+
+      sizeRetryCounts.set(adElement, retryCount + 1);
+      adElement.dataset.artReplacer = 'waiting';
+      window.setTimeout(() => {
+        if (!adElement.isConnected || adElement.dataset.artReplacer !== 'waiting') return;
+        delete adElement.dataset.artReplacer;
+        void replaceAd(adElement);
+      }, retryDelay);
       return;
     }
 
+    sizeRetryCounts.delete(adElement);
     adElement.dataset.artReplacer = 'loading';
 
     try {
@@ -170,8 +187,10 @@
 
       adElement.dataset.artReplacer = 'replacing';
 
-      // An iframe can't hold our markup, so swap it out in the parent.
-      if (adElement.tagName === 'IFRAME') {
+      // Iframes and custom elements may hide their children in another
+      // document or shadow tree, so replace the host itself.
+      const replaceHost = adElement.tagName === 'IFRAME' || adElement.tagName.includes('-');
+      if (replaceHost) {
         const parent = adElement.parentElement;
         if (parent) {
           parent.insertBefore(artContainer, adElement);
